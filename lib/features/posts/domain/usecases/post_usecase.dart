@@ -1,12 +1,14 @@
-import '../../data/repositories/post_repository_impl.dart';
+import '../entities/post_entity.dart';
+import '../repositories/post_repository.dart';
 
 class PostUsecase {
-  final PostRepositoryImpl _postRepository;
+  final PostRepository _postRepository;
 
   PostUsecase(this._postRepository);
 
-  Future<void> createPost(String content) async {
-    if (content.trim().isEmpty) return; // Prevent creating empty posts
-    await _postRepository.createPost(content);
-  }
+  Future<void> createPost(String content) async => await _postRepository.createPost(content);
+
+  Future<List<PostEntity>> getServerPosts() async => await _postRepository.getServerPosts();
+
+  // Stream<List<PostEntity>> watchLocalPosts() async => await _postRepository.watchLocalPosts();
 }

@@ -3,11 +3,14 @@ import 'dart:developer';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart';
+import 'package:field_reporter/features/posts/domain/entities/post_entity.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../domain/repositories/post_repository.dart';
 import '../data_sources/local_database.dart';
+import '../models/post_model.dart';
 
-class PostRepositoryImpl {
+class PostRepositoryImpl implements PostRepository {
   final AppDatabase _database;
   final SupabaseClient _supabaseClient;
   bool _isSyncing = false;
@@ -31,10 +34,7 @@ class PostRepositoryImpl {
     });
   }
 
-  Future<void> createPost(String content) async {
-    await _database.insertPostToOutbox(content);
-  }
-
+  // Sync Engine
   Future<void> triggerSyncEngine() async {
     if (_isSyncing) return;
     _isSyncing = true;
@@ -68,5 +68,28 @@ class PostRepositoryImpl {
     }
 
     _isSyncing = false;
+  }
+
+  @override
+  Future<void> createPost(String content) async {
+    await _database.insertPostToOutbox(content);
+  }
+
+  @override
+  Future<List<PostEntity>> getServerPosts() async {
+    try {
+      final response = await _supabaseClient.from('posts').select().order('created_at', ascending: false);
+
+      return List<Map<String, dynamic>>.from(response).map((json) => PostModel.fromJson(json)).toList();
+    } catch (e) {
+      throw Exception("ဆာဗာမှ ဒေတာဆွဲယူ၍ မရပါ - $e");
+    }
+  }
+
+  @override
+  Stream<List<PostEntity>> watchLocalPosts() {
+    return _database.select(_database.posts).watch().map((driftPosts) {
+      return driftPosts.map((post) => PostModel.fromDrift(post)).toList();
+    });
   }
 }

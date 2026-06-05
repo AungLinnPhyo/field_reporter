@@ -31,8 +31,9 @@ class OutboxQueue extends Table {
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
+  // Database Schema Version
   @override
-  int get schemaVersion => 1; // These version should be incremented when change the database schema
+  int get schemaVersion => 1; 
 
   Future<void> insertPostToOutbox(String postContent) async {
     await transaction(() async {
@@ -58,7 +59,7 @@ class AppDatabase extends _$AppDatabase {
   }
 }
 
-// Define a function to open the database connection
+// Define a path to store the database
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
     final dbFolder = await getApplicationDocumentsDirectory();
