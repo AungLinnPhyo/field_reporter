@@ -15,4 +15,8 @@ class PostUsecase {
   Stream<List<PostEntity>> watchCachedServerPosts() => _postRepository.watchCachedServerPosts();
 
   Future<void> fetchAndCacheServerPosts({bool forceRefresh = false}) async => await _postRepository.fetchAndCacheServerPosts(forceRefresh: forceRefresh);
+
+  Future<void> updateServerPost(int id, String newContent) async => await _postRepository.updateServerPost(id, newContent);
+
+  Future<void> deleteServerPost(int id) async => await _postRepository.deleteServerPost(id);
 }

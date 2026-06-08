@@ -5,7 +5,9 @@ abstract class PostRepository {
   // Future<List<PostEntity>> getServerPosts();
   // Stream<List<PostEntity>> watchLocalPosts();
   Future<void> createPost(String content);
-  Stream<List<PostEntity>> watchLocalPosts();       // TAB 1 အတွက် (Pending & local)
-  Stream<List<PostEntity>> watchCachedServerPosts(); // TAB 2 အတွက် (Server Cache စစ်စစ်)
+  Stream<List<PostEntity>> watchLocalPosts(); // Local 
+  Stream<List<PostEntity>> watchCachedServerPosts(); // Server Cache
   Future<void> fetchAndCacheServerPosts({bool forceRefresh = false});
+  Future<void> updateServerPost(int id, String newContent);
+  Future<void> deleteServerPost(int id);
 }

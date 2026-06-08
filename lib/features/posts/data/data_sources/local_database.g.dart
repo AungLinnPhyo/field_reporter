@@ -629,18 +629,19 @@ class $ServerPostsTable extends ServerPosts
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
-  static const VerificationMeta _statusMeta = const VerificationMeta('status');
-  @override
-  late final GeneratedColumn<String> status = GeneratedColumn<String>(
-    'status',
-    aliasedName,
-    false,
-    type: DriftSqlType.string,
-    requiredDuringInsert: false,
-    defaultValue: const Constant('synced'),
+  static const VerificationMeta _localStatusMeta = const VerificationMeta(
+    'localStatus',
   );
   @override
-  List<GeneratedColumn> get $columns => [id, content, status];
+  late final GeneratedColumn<String> localStatus = GeneratedColumn<String>(
+    'local_status',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, content, localStatus];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -664,10 +665,13 @@ class $ServerPostsTable extends ServerPosts
     } else if (isInserting) {
       context.missing(_contentMeta);
     }
-    if (data.containsKey('status')) {
+    if (data.containsKey('local_status')) {
       context.handle(
-        _statusMeta,
-        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+        _localStatusMeta,
+        localStatus.isAcceptableOrUnknown(
+          data['local_status']!,
+          _localStatusMeta,
+        ),
       );
     }
     return context;
@@ -687,10 +691,10 @@ class $ServerPostsTable extends ServerPosts
         DriftSqlType.string,
         data['${effectivePrefix}content'],
       )!,
-      status: attachedDatabase.typeMapping.read(
+      localStatus: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
-        data['${effectivePrefix}status'],
-      )!,
+        data['${effectivePrefix}local_status'],
+      ),
     );
   }
 
@@ -703,18 +707,16 @@ class $ServerPostsTable extends ServerPosts
 class ServerPost extends DataClass implements Insertable<ServerPost> {
   final int id;
   final String content;
-  final String status;
-  const ServerPost({
-    required this.id,
-    required this.content,
-    required this.status,
-  });
+  final String? localStatus;
+  const ServerPost({required this.id, required this.content, this.localStatus});
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['content'] = Variable<String>(content);
-    map['status'] = Variable<String>(status);
+    if (!nullToAbsent || localStatus != null) {
+      map['local_status'] = Variable<String>(localStatus);
+    }
     return map;
   }
 
@@ -722,7 +724,9 @@ class ServerPost extends DataClass implements Insertable<ServerPost> {
     return ServerPostsCompanion(
       id: Value(id),
       content: Value(content),
-      status: Value(status),
+      localStatus: localStatus == null && nullToAbsent
+          ? const Value.absent()
+          : Value(localStatus),
     );
   }
 
@@ -734,7 +738,7 @@ class ServerPost extends DataClass implements Insertable<ServerPost> {
     return ServerPost(
       id: serializer.fromJson<int>(json['id']),
       content: serializer.fromJson<String>(json['content']),
-      status: serializer.fromJson<String>(json['status']),
+      localStatus: serializer.fromJson<String?>(json['localStatus']),
     );
   }
   @override
@@ -743,20 +747,26 @@ class ServerPost extends DataClass implements Insertable<ServerPost> {
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
       'content': serializer.toJson<String>(content),
-      'status': serializer.toJson<String>(status),
+      'localStatus': serializer.toJson<String?>(localStatus),
     };
   }
 
-  ServerPost copyWith({int? id, String? content, String? status}) => ServerPost(
+  ServerPost copyWith({
+    int? id,
+    String? content,
+    Value<String?> localStatus = const Value.absent(),
+  }) => ServerPost(
     id: id ?? this.id,
     content: content ?? this.content,
-    status: status ?? this.status,
+    localStatus: localStatus.present ? localStatus.value : this.localStatus,
   );
   ServerPost copyWithCompanion(ServerPostsCompanion data) {
     return ServerPost(
       id: data.id.present ? data.id.value : this.id,
       content: data.content.present ? data.content.value : this.content,
-      status: data.status.present ? data.status.value : this.status,
+      localStatus: data.localStatus.present
+          ? data.localStatus.value
+          : this.localStatus,
     );
   }
 
@@ -765,57 +775,57 @@ class ServerPost extends DataClass implements Insertable<ServerPost> {
     return (StringBuffer('ServerPost(')
           ..write('id: $id, ')
           ..write('content: $content, ')
-          ..write('status: $status')
+          ..write('localStatus: $localStatus')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, content, status);
+  int get hashCode => Object.hash(id, content, localStatus);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is ServerPost &&
           other.id == this.id &&
           other.content == this.content &&
-          other.status == this.status);
+          other.localStatus == this.localStatus);
 }
 
 class ServerPostsCompanion extends UpdateCompanion<ServerPost> {
   final Value<int> id;
   final Value<String> content;
-  final Value<String> status;
+  final Value<String?> localStatus;
   const ServerPostsCompanion({
     this.id = const Value.absent(),
     this.content = const Value.absent(),
-    this.status = const Value.absent(),
+    this.localStatus = const Value.absent(),
   });
   ServerPostsCompanion.insert({
     this.id = const Value.absent(),
     required String content,
-    this.status = const Value.absent(),
+    this.localStatus = const Value.absent(),
   }) : content = Value(content);
   static Insertable<ServerPost> custom({
     Expression<int>? id,
     Expression<String>? content,
-    Expression<String>? status,
+    Expression<String>? localStatus,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (content != null) 'content': content,
-      if (status != null) 'status': status,
+      if (localStatus != null) 'local_status': localStatus,
     });
   }
 
   ServerPostsCompanion copyWith({
     Value<int>? id,
     Value<String>? content,
-    Value<String>? status,
+    Value<String?>? localStatus,
   }) {
     return ServerPostsCompanion(
       id: id ?? this.id,
       content: content ?? this.content,
-      status: status ?? this.status,
+      localStatus: localStatus ?? this.localStatus,
     );
   }
 
@@ -828,8 +838,8 @@ class ServerPostsCompanion extends UpdateCompanion<ServerPost> {
     if (content.present) {
       map['content'] = Variable<String>(content.value);
     }
-    if (status.present) {
-      map['status'] = Variable<String>(status.value);
+    if (localStatus.present) {
+      map['local_status'] = Variable<String>(localStatus.value);
     }
     return map;
   }
@@ -839,7 +849,7 @@ class ServerPostsCompanion extends UpdateCompanion<ServerPost> {
     return (StringBuffer('ServerPostsCompanion(')
           ..write('id: $id, ')
           ..write('content: $content, ')
-          ..write('status: $status')
+          ..write('localStatus: $localStatus')
           ..write(')'))
         .toString();
   }
@@ -1213,13 +1223,13 @@ typedef $$ServerPostsTableCreateCompanionBuilder =
     ServerPostsCompanion Function({
       Value<int> id,
       required String content,
-      Value<String> status,
+      Value<String?> localStatus,
     });
 typedef $$ServerPostsTableUpdateCompanionBuilder =
     ServerPostsCompanion Function({
       Value<int> id,
       Value<String> content,
-      Value<String> status,
+      Value<String?> localStatus,
     });
 
 class $$ServerPostsTableFilterComposer
@@ -1241,8 +1251,8 @@ class $$ServerPostsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
-  ColumnFilters<String> get status => $composableBuilder(
-    column: $table.status,
+  ColumnFilters<String> get localStatus => $composableBuilder(
+    column: $table.localStatus,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -1266,8 +1276,8 @@ class $$ServerPostsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
-  ColumnOrderings<String> get status => $composableBuilder(
-    column: $table.status,
+  ColumnOrderings<String> get localStatus => $composableBuilder(
+    column: $table.localStatus,
     builder: (column) => ColumnOrderings(column),
   );
 }
@@ -1287,8 +1297,10 @@ class $$ServerPostsTableAnnotationComposer
   GeneratedColumn<String> get content =>
       $composableBuilder(column: $table.content, builder: (column) => column);
 
-  GeneratedColumn<String> get status =>
-      $composableBuilder(column: $table.status, builder: (column) => column);
+  GeneratedColumn<String> get localStatus => $composableBuilder(
+    column: $table.localStatus,
+    builder: (column) => column,
+  );
 }
 
 class $$ServerPostsTableTableManager
@@ -1324,21 +1336,21 @@ class $$ServerPostsTableTableManager
               ({
                 Value<int> id = const Value.absent(),
                 Value<String> content = const Value.absent(),
-                Value<String> status = const Value.absent(),
+                Value<String?> localStatus = const Value.absent(),
               }) => ServerPostsCompanion(
                 id: id,
                 content: content,
-                status: status,
+                localStatus: localStatus,
               ),
           createCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
                 required String content,
-                Value<String> status = const Value.absent(),
+                Value<String?> localStatus = const Value.absent(),
               }) => ServerPostsCompanion.insert(
                 id: id,
                 content: content,
-                status: status,
+                localStatus: localStatus,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))

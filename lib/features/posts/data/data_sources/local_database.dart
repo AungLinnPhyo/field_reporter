@@ -23,7 +23,8 @@ class Posts extends Table {
 class ServerPosts extends Table {
   IntColumn get id => integer()(); // Server Post ID
   TextColumn get content => text()();
-  TextColumn get status => text().withDefault(const Constant('synced'))();
+  // TextColumn get status => text().withDefault(const Constant('synced'))();
+  TextColumn get localStatus => text().nullable()(); // pending_update for Update and pending_delete for Delete
 
   @override
   Set<Column> get primaryKey => {id}; // Primary Key
@@ -45,7 +46,7 @@ class AppDatabase extends _$AppDatabase {
 
   // Database Schema Version
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration {
@@ -54,6 +55,9 @@ class AppDatabase extends _$AppDatabase {
       onUpgrade: (m, from, to) async {
         if (from < 2) {
           await m.createTable(serverPosts);
+        }
+        if (from < 4 && from >= 2) {
+          await m.addColumn(serverPosts, serverPosts.localStatus);
         }
       },
     );

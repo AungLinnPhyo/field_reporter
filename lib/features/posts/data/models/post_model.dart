@@ -7,18 +7,21 @@ class PostModel extends PostEntity {
     required super.id,
     required super.content,
     required super.status,
+    super.localStatus,
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) => PostModel(
     id: json['id'] as int,
     content: json['content'] as String,
     status: 'synced', // Synced by default
+    localStatus: null,
   );
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'content': content,
     'status': status,
+    'local': localStatus,
   };
 
   factory PostModel.fromDrift(Post driftPost) {

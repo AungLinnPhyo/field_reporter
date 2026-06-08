@@ -3,9 +3,9 @@ import 'dart:developer';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart';
-import 'package:field_reporter/features/posts/domain/entities/post_entity.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../domain/entities/post_entity.dart';
 import '../../domain/repositories/post_repository.dart';
 import '../data_sources/local_database.dart';
 import '../models/post_model.dart';
@@ -19,7 +19,9 @@ class PostRepositoryImpl implements PostRepository {
   static const _cacheDuration = Duration(minutes: 5);
 
   PostRepositoryImpl(this._database, this._supabaseClient) {
-    // _initSyncEngine();
+    // 🚀 Check and sync immediately on startup
+    triggerSyncEngine();
+
     // Watch the connectivity
     Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
       // အင်တာနက် ပြန်ပွင့်လာပြီဆိုလျှင် (none မဟုတ်တော့လျှင်) Sync Engine ကို လှမ်းနှိုးမည်
@@ -42,51 +44,68 @@ class PostRepositoryImpl implements PostRepository {
     if (_isSyncing) return;
     _isSyncing = true;
 
-    // Outbox Queue ထဲမှာ ပို့ဖို့ကျန်တာတွေ အကုန်လှမ်းယူမယ်
-    final outboxItems = await _database.select(_database.outboxQueue).get();
+    try {
+      // Continue looping as long as there are items and internet is available
+      while (true) {
+        final connectivity = await Connectivity().checkConnectivity();
+        if (connectivity.contains(ConnectivityResult.none)) {
+          log("📡 Sync Engine: No internet connection. Standing by...");
+          break;
+        }
 
-    log("🔄 Sync Engine Triggered - ${outboxItems.length} item(s) to sync");
+        final outboxItems = await _database.select(_database.outboxQueue).get();
+        if (outboxItems.isEmpty) break;
 
-    for (var item in outboxItems) {
-      try {
-        final Map<String, dynamic> payload = jsonDecode(item.payload);
-        final int localId = payload['id'];
-        final String content = payload['content'];
-        final String idempotencyKey = payload['idempotency_key'];
+        log("🔄 Sync Engine: Processing ${outboxItems.length} item(s)");
 
-        log("📤 Syncing Local ID: $localId with content: $content");
+        for (var item in outboxItems) {
+          try {
+            final Map<String, dynamic> payload = jsonDecode(item.payload);
 
-        await _supabaseClient.from('posts').upsert({'content': content, 'idempotency_key': idempotencyKey}, onConflict: 'idempotency_key').select();
+            if (item.actionType == 'create_post') {
+              final int localId = payload['id'];
+              final String content = payload['content'];
+              final String idempotencyKey = payload['idempotency_key'];
 
-        log("📤 Upserted into Supabase for Local ID: $localId");
+              await _supabaseClient.from('posts').upsert({'content': content, 'idempotency_key': idempotencyKey}, onConflict: 'idempotency_key').select();
 
-        // Update Local DB with synced status
-        // await (_database.update(_database.posts)..where((t) => t.id.equals(localId))).write(PostsCompanion(status: const Value('synced')));
+              await (_database.delete(_database.posts)..where((t) => t.id.equals(localId))).go();
+            } else if (item.actionType == 'edit_post') {
+              final int serverId = payload["post_id"];
+              final String newContent = payload['content'];
 
-        // Delete synced item from Local DB
-        await (_database.delete(_database.posts)..where((t) => t.id.equals(localId))).go();
-        
-        // Delete synced item from Outbox
-        await (_database.delete(_database.outboxQueue)..where((t) => t.id.equals(item.id))).go();
+              await _supabaseClient.from('posts').update({'content': newContent}).eq('id', serverId);
 
-        log("✅ Synced Completed for Local ID: $localId");
-      } catch (e) {
-        log("❌ Sync Engine Paused: $e");
-        break;
+              await (_database.update(_database.serverPosts)..where((t) => t.id.equals(serverId))).write(ServerPostsCompanion(localStatus: const Value(null)));
+            } else if (item.actionType == 'delete_post') {
+              final int serverId = payload['post_id'];
+
+              await _supabaseClient.from('posts').delete().eq('id', serverId);
+
+              await (_database.delete(_database.serverPosts)..where((t) => t.id.equals(serverId))).go();
+            }
+
+            // Remove from outbox ONLY after successful Supabase operation
+            await (_database.delete(_database.outboxQueue)..where((t) => t.id.equals(item.id))).go();
+            log("✅ Sync Completed: ${item.actionType}");
+          } catch (e) {
+            log("❌ Item Sync Failed (${item.actionType}): $e");
+            return; // Exit the loop on error to prevent out-of-order syncs
+          }
+        }
+
+        // Force refresh server cache after a batch is done
+        try {
+          await fetchAndCacheServerPosts(forceRefresh: true);
+        } catch (e) {
+          log("📡 Auto-refresh of server cache failed: $e");
+        }
       }
+    } catch (e) {
+      log("❌ Sync Engine Fatal Error: $e");
+    } finally {
+      _isSyncing = false;
     }
-
-    // After successfully syncing items, force a refresh of the server cache.
-    // This ensures the "Feed" tab (which watches serverPosts table) reflects the new data.
-    if (outboxItems.isNotEmpty) {
-      try {
-        await fetchAndCacheServerPosts(forceRefresh: true);
-      } catch (e) {
-        log("📡 Auto-refresh of server cache failed: $e");
-      }
-    }
-
-    _isSyncing = false;
   }
 
   @override
@@ -109,12 +128,21 @@ class PostRepositoryImpl implements PostRepository {
     }
 
     try {
+      // Local မှာ ပြင်ဆင်ဆဲ (သို့) ဖျက်ဆဲဖြစ်နေသော ID များကို ရှာဖွေခြင်း
+      final pendingItems = await (_database.select(_database.serverPosts)..where((t) => t.localStatus.isNotNull())).get();
+      final pendingIds = pendingItems.map((e) => e.id).toSet();
+
       final response = await _supabaseClient.from('posts').select().order('created_at', ascending: false);
       final serverPostsData = List<Map<String, dynamic>>.from(response);
 
       await _database.transaction(() async {
         for (final json in serverPostsData) {
-          await _database.into(_database.serverPosts).insertOnConflictUpdate(ServerPostsCompanion(id: Value(json['id'] as int), content: Value(json['content'] as String), status: Value('synced')));
+          final serverId = json['id'] as int;
+
+          // 🔥 အကယ်၍ ဤ ID သည် အော့ဖ်လိုင်းတွင် ပြင်ဆင်နေဆဲ ID ဖြစ်ပါက ဆာဗာဒေတာဟောင်းဖြင့် Overwrite မလုပ်ဘဲ ကျော်သွားမည်!
+          if (pendingIds.contains(serverId)) continue;
+
+          await _database.into(_database.serverPosts).insertOnConflictUpdate(ServerPostsCompanion(id: Value(serverId), content: Value(json['content'] as String)));
         }
       });
       _lastFetchTime = now;
@@ -128,8 +156,31 @@ class PostRepositoryImpl implements PostRepository {
   Stream<List<PostEntity>> watchCachedServerPosts() {
     return (_database.select(_database.serverPosts)..orderBy([(t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc)])).watch().map((driftServerPosts) {
       return driftServerPosts.map((post) {
-        return PostEntity(id: post.id, content: post.content, status: 'synced');
+        return PostEntity(id: post.id, content: post.content, status: 'synced', localStatus: post.localStatus);
       }).toList();
+    });
+  }
+
+  @override
+  Future<void> deleteServerPost(int id) async {
+    await _database.transaction(() async {
+      await (_database.update(_database.serverPosts)..where((tbl) => tbl.id.equals(id))).write(ServerPostsCompanion(localStatus: const Value('pending_delete')));
+
+      final payload = jsonEncode({'post_id': id});
+
+      await _database.into(_database.outboxQueue).insert(OutboxQueueCompanion.insert(actionType: 'delete_post', payload: payload));
+    });
+  }
+
+  @override
+  Future<void> updateServerPost(int id, String newContent) async {
+    await _database.transaction(() async {
+      // Update local cache state immediately
+      await (_database.update(_database.serverPosts)..where((t) => t.id.equals(id))).write(ServerPostsCompanion(content: Value(newContent), localStatus: const Value('pending_update')));
+
+      // Add to sync queue
+      final payload = jsonEncode({'post_id': id, 'content': newContent});
+      await _database.into(_database.outboxQueue).insert(OutboxQueueCompanion.insert(actionType: 'edit_post', payload: payload));
     });
   }
 }
