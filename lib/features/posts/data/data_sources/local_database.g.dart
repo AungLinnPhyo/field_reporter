@@ -42,8 +42,19 @@ class $PostsTable extends Posts with TableInfo<$PostsTable, Post> {
     requiredDuringInsert: false,
     defaultValue: const Constant('pending'),
   );
+  static const VerificationMeta _idempotencyKeyMeta = const VerificationMeta(
+    'idempotencyKey',
+  );
   @override
-  List<GeneratedColumn> get $columns => [id, content, status];
+  late final GeneratedColumn<String> idempotencyKey = GeneratedColumn<String>(
+    'idempotency_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, content, status, idempotencyKey];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -73,6 +84,17 @@ class $PostsTable extends Posts with TableInfo<$PostsTable, Post> {
         status.isAcceptableOrUnknown(data['status']!, _statusMeta),
       );
     }
+    if (data.containsKey('idempotency_key')) {
+      context.handle(
+        _idempotencyKeyMeta,
+        idempotencyKey.isAcceptableOrUnknown(
+          data['idempotency_key']!,
+          _idempotencyKeyMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_idempotencyKeyMeta);
+    }
     return context;
   }
 
@@ -94,6 +116,10 @@ class $PostsTable extends Posts with TableInfo<$PostsTable, Post> {
         DriftSqlType.string,
         data['${effectivePrefix}status'],
       )!,
+      idempotencyKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}idempotency_key'],
+      )!,
     );
   }
 
@@ -107,13 +133,20 @@ class Post extends DataClass implements Insertable<Post> {
   final int id;
   final String content;
   final String status;
-  const Post({required this.id, required this.content, required this.status});
+  final String idempotencyKey;
+  const Post({
+    required this.id,
+    required this.content,
+    required this.status,
+    required this.idempotencyKey,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['content'] = Variable<String>(content);
     map['status'] = Variable<String>(status);
+    map['idempotency_key'] = Variable<String>(idempotencyKey);
     return map;
   }
 
@@ -122,6 +155,7 @@ class Post extends DataClass implements Insertable<Post> {
       id: Value(id),
       content: Value(content),
       status: Value(status),
+      idempotencyKey: Value(idempotencyKey),
     );
   }
 
@@ -134,6 +168,7 @@ class Post extends DataClass implements Insertable<Post> {
       id: serializer.fromJson<int>(json['id']),
       content: serializer.fromJson<String>(json['content']),
       status: serializer.fromJson<String>(json['status']),
+      idempotencyKey: serializer.fromJson<String>(json['idempotencyKey']),
     );
   }
   @override
@@ -143,19 +178,29 @@ class Post extends DataClass implements Insertable<Post> {
       'id': serializer.toJson<int>(id),
       'content': serializer.toJson<String>(content),
       'status': serializer.toJson<String>(status),
+      'idempotencyKey': serializer.toJson<String>(idempotencyKey),
     };
   }
 
-  Post copyWith({int? id, String? content, String? status}) => Post(
+  Post copyWith({
+    int? id,
+    String? content,
+    String? status,
+    String? idempotencyKey,
+  }) => Post(
     id: id ?? this.id,
     content: content ?? this.content,
     status: status ?? this.status,
+    idempotencyKey: idempotencyKey ?? this.idempotencyKey,
   );
   Post copyWithCompanion(PostsCompanion data) {
     return Post(
       id: data.id.present ? data.id.value : this.id,
       content: data.content.present ? data.content.value : this.content,
       status: data.status.present ? data.status.value : this.status,
+      idempotencyKey: data.idempotencyKey.present
+          ? data.idempotencyKey.value
+          : this.idempotencyKey,
     );
   }
 
@@ -164,45 +209,53 @@ class Post extends DataClass implements Insertable<Post> {
     return (StringBuffer('Post(')
           ..write('id: $id, ')
           ..write('content: $content, ')
-          ..write('status: $status')
+          ..write('status: $status, ')
+          ..write('idempotencyKey: $idempotencyKey')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(id, content, status);
+  int get hashCode => Object.hash(id, content, status, idempotencyKey);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is Post &&
           other.id == this.id &&
           other.content == this.content &&
-          other.status == this.status);
+          other.status == this.status &&
+          other.idempotencyKey == this.idempotencyKey);
 }
 
 class PostsCompanion extends UpdateCompanion<Post> {
   final Value<int> id;
   final Value<String> content;
   final Value<String> status;
+  final Value<String> idempotencyKey;
   const PostsCompanion({
     this.id = const Value.absent(),
     this.content = const Value.absent(),
     this.status = const Value.absent(),
+    this.idempotencyKey = const Value.absent(),
   });
   PostsCompanion.insert({
     this.id = const Value.absent(),
     required String content,
     this.status = const Value.absent(),
-  }) : content = Value(content);
+    required String idempotencyKey,
+  }) : content = Value(content),
+       idempotencyKey = Value(idempotencyKey);
   static Insertable<Post> custom({
     Expression<int>? id,
     Expression<String>? content,
     Expression<String>? status,
+    Expression<String>? idempotencyKey,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (content != null) 'content': content,
       if (status != null) 'status': status,
+      if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
     });
   }
 
@@ -210,11 +263,13 @@ class PostsCompanion extends UpdateCompanion<Post> {
     Value<int>? id,
     Value<String>? content,
     Value<String>? status,
+    Value<String>? idempotencyKey,
   }) {
     return PostsCompanion(
       id: id ?? this.id,
       content: content ?? this.content,
       status: status ?? this.status,
+      idempotencyKey: idempotencyKey ?? this.idempotencyKey,
     );
   }
 
@@ -230,6 +285,9 @@ class PostsCompanion extends UpdateCompanion<Post> {
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
+    if (idempotencyKey.present) {
+      map['idempotency_key'] = Variable<String>(idempotencyKey.value);
+    }
     return map;
   }
 
@@ -238,7 +296,8 @@ class PostsCompanion extends UpdateCompanion<Post> {
     return (StringBuffer('PostsCompanion(')
           ..write('id: $id, ')
           ..write('content: $content, ')
-          ..write('status: $status')
+          ..write('status: $status, ')
+          ..write('idempotencyKey: $idempotencyKey')
           ..write(')'))
         .toString();
   }
@@ -808,12 +867,14 @@ typedef $$PostsTableCreateCompanionBuilder =
       Value<int> id,
       required String content,
       Value<String> status,
+      required String idempotencyKey,
     });
 typedef $$PostsTableUpdateCompanionBuilder =
     PostsCompanion Function({
       Value<int> id,
       Value<String> content,
       Value<String> status,
+      Value<String> idempotencyKey,
     });
 
 class $$PostsTableFilterComposer extends Composer<_$AppDatabase, $PostsTable> {
@@ -836,6 +897,11 @@ class $$PostsTableFilterComposer extends Composer<_$AppDatabase, $PostsTable> {
 
   ColumnFilters<String> get status => $composableBuilder(
     column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get idempotencyKey => $composableBuilder(
+    column: $table.idempotencyKey,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -863,6 +929,11 @@ class $$PostsTableOrderingComposer
     column: $table.status,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get idempotencyKey => $composableBuilder(
+    column: $table.idempotencyKey,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$PostsTableAnnotationComposer
@@ -882,6 +953,11 @@ class $$PostsTableAnnotationComposer
 
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<String> get idempotencyKey => $composableBuilder(
+    column: $table.idempotencyKey,
+    builder: (column) => column,
+  );
 }
 
 class $$PostsTableTableManager
@@ -915,16 +991,24 @@ class $$PostsTableTableManager
                 Value<int> id = const Value.absent(),
                 Value<String> content = const Value.absent(),
                 Value<String> status = const Value.absent(),
-              }) => PostsCompanion(id: id, content: content, status: status),
+                Value<String> idempotencyKey = const Value.absent(),
+              }) => PostsCompanion(
+                id: id,
+                content: content,
+                status: status,
+                idempotencyKey: idempotencyKey,
+              ),
           createCompanionCallback:
               ({
                 Value<int> id = const Value.absent(),
                 required String content,
                 Value<String> status = const Value.absent(),
+                required String idempotencyKey,
               }) => PostsCompanion.insert(
                 id: id,
                 content: content,
                 status: status,
+                idempotencyKey: idempotencyKey,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), BaseReferences(db, table, e)))

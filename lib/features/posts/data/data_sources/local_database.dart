@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:uuid/uuid.dart';
 
 part 'local_database.g.dart';
 
@@ -15,6 +16,7 @@ class Posts extends Table {
   TextColumn get content => text()();
   // TextColumn get status => text().clientDefault(() => 'pending')(); // Deafult value (Client-side)
   TextColumn get status => text().withDefault(const Constant('pending'))(); // Deafult value (Server-side)
+  TextColumn get idempotencyKey => text()();
 }
 
 /// Server Post Table
@@ -58,10 +60,13 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> insertPostToOutbox(String postContent) async {
-    await transaction(() async {
-      final postId = await into(posts).insert(PostsCompanion.insert(content: postContent, status: const Value('pending')));
+    // UUID v4 (Idempotency Key) တစ်ခု ထုတ်လုပ်လိုက်ခြင်း
+    final uuid = const Uuid().v4();
 
-      final payload = jsonEncode({'id': postId, 'content': postContent});
+    await transaction(() async {
+      final postId = await into(posts).insert(PostsCompanion.insert(content: postContent, status: const Value('pending'), idempotencyKey: uuid));
+
+      final payload = jsonEncode({'id': postId, 'content': postContent, 'idempotency_key': uuid});
 
       await into(outboxQueue).insert(OutboxQueueCompanion.insert(actionType: 'create_post', payload: payload));
     });

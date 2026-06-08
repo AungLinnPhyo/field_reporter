@@ -52,12 +52,13 @@ class PostRepositoryImpl implements PostRepository {
         final Map<String, dynamic> payload = jsonDecode(item.payload);
         final int localId = payload['id'];
         final String content = payload['content'];
+        final String idempotencyKey = payload['idempotency_key'];
 
         log("📤 Syncing Local ID: $localId with content: $content");
 
-        await _supabaseClient.from('posts').insert({'content': content});
+        await _supabaseClient.from('posts').upsert({'content': content, 'idempotency_key': idempotencyKey}, onConflict: 'idempotency_key').select();
 
-        log("📤 Inserted into Supabase for Local ID: $localId");
+        log("📤 Upserted into Supabase for Local ID: $localId");
 
         await (_database.update(_database.posts)..where((t) => t.id.equals(localId))).write(PostsCompanion(status: const Value('synced')));
 
@@ -67,6 +68,16 @@ class PostRepositoryImpl implements PostRepository {
       } catch (e) {
         log("❌ Sync Engine Paused: $e");
         break;
+      }
+    }
+
+    // After successfully syncing items, force a refresh of the server cache.
+    // This ensures the "Feed" tab (which watches serverPosts table) reflects the new data.
+    if (outboxItems.isNotEmpty) {
+      try {
+        await fetchAndCacheServerPosts(forceRefresh: true);
+      } catch (e) {
+        log("📡 Auto-refresh of server cache failed: $e");
       }
     }
 
