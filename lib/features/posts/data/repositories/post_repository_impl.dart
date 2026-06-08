@@ -60,8 +60,13 @@ class PostRepositoryImpl implements PostRepository {
 
         log("📤 Upserted into Supabase for Local ID: $localId");
 
-        await (_database.update(_database.posts)..where((t) => t.id.equals(localId))).write(PostsCompanion(status: const Value('synced')));
+        // Update Local DB with synced status
+        // await (_database.update(_database.posts)..where((t) => t.id.equals(localId))).write(PostsCompanion(status: const Value('synced')));
 
+        // Delete synced item from Local DB
+        await (_database.delete(_database.posts)..where((t) => t.id.equals(localId))).go();
+        
+        // Delete synced item from Outbox
         await (_database.delete(_database.outboxQueue)..where((t) => t.id.equals(item.id))).go();
 
         log("✅ Synced Completed for Local ID: $localId");
