@@ -17,6 +17,16 @@ class Posts extends Table {
   TextColumn get status => text().withDefault(const Constant('pending'))(); // Deafult value (Server-side)
 }
 
+/// Server Post Table
+class ServerPosts extends Table {
+  IntColumn get id => integer()(); // Server Post ID
+  TextColumn get content => text()();
+  TextColumn get status => text().withDefault(const Constant('synced'))();
+
+  @override
+  Set<Column> get primaryKey => {id}; // Primary Key
+}
+
 /// OutboxQueue table
 class OutboxQueue extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -27,35 +37,34 @@ class OutboxQueue extends Table {
 }
 
 /// Database class
-@DriftDatabase(tables: [Posts, OutboxQueue])
+@DriftDatabase(tables: [Posts, OutboxQueue, ServerPosts])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   // Database Schema Version
   @override
-  int get schemaVersion => 1; 
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration {
+    return MigrationStrategy(
+      onCreate: (m) => m.createAll(),
+      onUpgrade: (m, from, to) async {
+        if (from < 2) {
+          await m.createTable(serverPosts);
+        }
+      },
+    );
+  }
 
   Future<void> insertPostToOutbox(String postContent) async {
     await transaction(() async {
-      final postId = await into(posts).insert(
-        PostsCompanion.insert(
-          content: postContent,
-          status: const Value('pending'),
-        )
-      );
+      final postId = await into(posts).insert(PostsCompanion.insert(content: postContent, status: const Value('pending')));
 
-      final payload = jsonEncode({
-        'id': postId,
-        'content': postContent,
-      });
+      final payload = jsonEncode({'id': postId, 'content': postContent});
 
-      await into(outboxQueue).insert(
-        OutboxQueueCompanion.insert(
-          actionType: 'create_post',
-          payload: payload,
-        )
-      );
-    },);
+      await into(outboxQueue).insert(OutboxQueueCompanion.insert(actionType: 'create_post', payload: payload));
+    });
   }
 }
 

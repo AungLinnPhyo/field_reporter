@@ -42,8 +42,16 @@ final postsStreamProvider = StreamProvider<List<PostEntity>>((ref) {
   return repository.watchLocalPosts();
 });
 
-/// Posts Stream Provider
-final serverPostsFutureProvider = FutureProvider<List<PostEntity>>((ref) async {
+/// Fetch Server Posts Future Provider
+final fetchServerPostsFutureProvider = FutureProvider.family<void, bool>((ref, refresh) async {
   final useCase = ref.watch(postUsecaseProvider);
-  return await useCase.getServerPosts();
+  await useCase.fetchAndCacheServerPosts(forceRefresh: refresh);
+});
+
+final cachedPostsProvider = StreamProvider<List<PostEntity>>((ref) {
+  final repository = ref.watch(postRepositoryProvider);
+
+  ref.watch(fetchServerPostsFutureProvider(false));
+
+  return repository.watchCachedServerPosts();
 });

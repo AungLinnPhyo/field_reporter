@@ -8,7 +8,11 @@ class PostUsecase {
 
   Future<void> createPost(String content) async => await _postRepository.createPost(content);
 
-  Future<List<PostEntity>> getServerPosts() async => await _postRepository.getServerPosts();
+  // Future<List<PostEntity>> getServerPosts() async => await _postRepository.getServerPosts();
 
-  // Stream<List<PostEntity>> watchLocalPosts() async => await _postRepository.watchLocalPosts();
+  Stream<List<PostEntity>> watchLocalPosts() => _postRepository.watchLocalPosts();
+
+  Stream<List<PostEntity>> watchCachedServerPosts() => _postRepository.watchCachedServerPosts();
+
+  Future<void> fetchAndCacheServerPosts({bool forceRefresh = false}) async => await _postRepository.fetchAndCacheServerPosts(forceRefresh: forceRefresh);
 }

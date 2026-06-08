@@ -544,16 +544,263 @@ class OutboxQueueCompanion extends UpdateCompanion<OutboxQueueData> {
   }
 }
 
+class $ServerPostsTable extends ServerPosts
+    with TableInfo<$ServerPostsTable, ServerPost> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ServerPostsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _contentMeta = const VerificationMeta(
+    'content',
+  );
+  @override
+  late final GeneratedColumn<String> content = GeneratedColumn<String>(
+    'content',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('synced'),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, content, status];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'server_posts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ServerPost> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('content')) {
+      context.handle(
+        _contentMeta,
+        content.isAcceptableOrUnknown(data['content']!, _contentMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_contentMeta);
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ServerPost map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ServerPost(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      content: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}content'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+    );
+  }
+
+  @override
+  $ServerPostsTable createAlias(String alias) {
+    return $ServerPostsTable(attachedDatabase, alias);
+  }
+}
+
+class ServerPost extends DataClass implements Insertable<ServerPost> {
+  final int id;
+  final String content;
+  final String status;
+  const ServerPost({
+    required this.id,
+    required this.content,
+    required this.status,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['content'] = Variable<String>(content);
+    map['status'] = Variable<String>(status);
+    return map;
+  }
+
+  ServerPostsCompanion toCompanion(bool nullToAbsent) {
+    return ServerPostsCompanion(
+      id: Value(id),
+      content: Value(content),
+      status: Value(status),
+    );
+  }
+
+  factory ServerPost.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ServerPost(
+      id: serializer.fromJson<int>(json['id']),
+      content: serializer.fromJson<String>(json['content']),
+      status: serializer.fromJson<String>(json['status']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'content': serializer.toJson<String>(content),
+      'status': serializer.toJson<String>(status),
+    };
+  }
+
+  ServerPost copyWith({int? id, String? content, String? status}) => ServerPost(
+    id: id ?? this.id,
+    content: content ?? this.content,
+    status: status ?? this.status,
+  );
+  ServerPost copyWithCompanion(ServerPostsCompanion data) {
+    return ServerPost(
+      id: data.id.present ? data.id.value : this.id,
+      content: data.content.present ? data.content.value : this.content,
+      status: data.status.present ? data.status.value : this.status,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ServerPost(')
+          ..write('id: $id, ')
+          ..write('content: $content, ')
+          ..write('status: $status')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, content, status);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ServerPost &&
+          other.id == this.id &&
+          other.content == this.content &&
+          other.status == this.status);
+}
+
+class ServerPostsCompanion extends UpdateCompanion<ServerPost> {
+  final Value<int> id;
+  final Value<String> content;
+  final Value<String> status;
+  const ServerPostsCompanion({
+    this.id = const Value.absent(),
+    this.content = const Value.absent(),
+    this.status = const Value.absent(),
+  });
+  ServerPostsCompanion.insert({
+    this.id = const Value.absent(),
+    required String content,
+    this.status = const Value.absent(),
+  }) : content = Value(content);
+  static Insertable<ServerPost> custom({
+    Expression<int>? id,
+    Expression<String>? content,
+    Expression<String>? status,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (content != null) 'content': content,
+      if (status != null) 'status': status,
+    });
+  }
+
+  ServerPostsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? content,
+    Value<String>? status,
+  }) {
+    return ServerPostsCompanion(
+      id: id ?? this.id,
+      content: content ?? this.content,
+      status: status ?? this.status,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (content.present) {
+      map['content'] = Variable<String>(content.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ServerPostsCompanion(')
+          ..write('id: $id, ')
+          ..write('content: $content, ')
+          ..write('status: $status')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $PostsTable posts = $PostsTable(this);
   late final $OutboxQueueTable outboxQueue = $OutboxQueueTable(this);
+  late final $ServerPostsTable serverPosts = $ServerPostsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [posts, outboxQueue];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+    posts,
+    outboxQueue,
+    serverPosts,
+  ];
 }
 
 typedef $$PostsTableCreateCompanionBuilder =
@@ -878,6 +1125,162 @@ typedef $$OutboxQueueTableProcessedTableManager =
       OutboxQueueData,
       PrefetchHooks Function()
     >;
+typedef $$ServerPostsTableCreateCompanionBuilder =
+    ServerPostsCompanion Function({
+      Value<int> id,
+      required String content,
+      Value<String> status,
+    });
+typedef $$ServerPostsTableUpdateCompanionBuilder =
+    ServerPostsCompanion Function({
+      Value<int> id,
+      Value<String> content,
+      Value<String> status,
+    });
+
+class $$ServerPostsTableFilterComposer
+    extends Composer<_$AppDatabase, $ServerPostsTable> {
+  $$ServerPostsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get content => $composableBuilder(
+    column: $table.content,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ServerPostsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ServerPostsTable> {
+  $$ServerPostsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get content => $composableBuilder(
+    column: $table.content,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ServerPostsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ServerPostsTable> {
+  $$ServerPostsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get content =>
+      $composableBuilder(column: $table.content, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+}
+
+class $$ServerPostsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ServerPostsTable,
+          ServerPost,
+          $$ServerPostsTableFilterComposer,
+          $$ServerPostsTableOrderingComposer,
+          $$ServerPostsTableAnnotationComposer,
+          $$ServerPostsTableCreateCompanionBuilder,
+          $$ServerPostsTableUpdateCompanionBuilder,
+          (
+            ServerPost,
+            BaseReferences<_$AppDatabase, $ServerPostsTable, ServerPost>,
+          ),
+          ServerPost,
+          PrefetchHooks Function()
+        > {
+  $$ServerPostsTableTableManager(_$AppDatabase db, $ServerPostsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ServerPostsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ServerPostsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ServerPostsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> content = const Value.absent(),
+                Value<String> status = const Value.absent(),
+              }) => ServerPostsCompanion(
+                id: id,
+                content: content,
+                status: status,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String content,
+                Value<String> status = const Value.absent(),
+              }) => ServerPostsCompanion.insert(
+                id: id,
+                content: content,
+                status: status,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ServerPostsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ServerPostsTable,
+      ServerPost,
+      $$ServerPostsTableFilterComposer,
+      $$ServerPostsTableOrderingComposer,
+      $$ServerPostsTableAnnotationComposer,
+      $$ServerPostsTableCreateCompanionBuilder,
+      $$ServerPostsTableUpdateCompanionBuilder,
+      (
+        ServerPost,
+        BaseReferences<_$AppDatabase, $ServerPostsTable, ServerPost>,
+      ),
+      ServerPost,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -886,4 +1289,6 @@ class $AppDatabaseManager {
       $$PostsTableTableManager(_db, _db.posts);
   $$OutboxQueueTableTableManager get outboxQueue =>
       $$OutboxQueueTableTableManager(_db, _db.outboxQueue);
+  $$ServerPostsTableTableManager get serverPosts =>
+      $$ServerPostsTableTableManager(_db, _db.serverPosts);
 }

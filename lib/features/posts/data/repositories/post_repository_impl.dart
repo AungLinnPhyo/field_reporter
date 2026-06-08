@@ -15,6 +15,9 @@ class PostRepositoryImpl implements PostRepository {
   final SupabaseClient _supabaseClient;
   bool _isSyncing = false;
 
+  DateTime? _lastFetchTime;
+  static const _cacheDuration = Duration(minutes: 5);
+
   PostRepositoryImpl(this._database, this._supabaseClient) {
     // _initSyncEngine();
     // Watch the connectivity
@@ -76,20 +79,41 @@ class PostRepositoryImpl implements PostRepository {
   }
 
   @override
-  Future<List<PostEntity>> getServerPosts() async {
+  Stream<List<PostEntity>> watchLocalPosts() {
+    return (_database.select(_database.posts)..orderBy([(t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc)])).watch().map((driftPosts) {
+      return driftPosts.map((post) => PostModel.fromDrift(post)).toList();
+    });
+  }
+
+  @override
+  Future<void> fetchAndCacheServerPosts({bool forceRefresh = false}) async {
+    final now = DateTime.now();
+    if (!forceRefresh && _lastFetchTime != null && now.difference(_lastFetchTime!) < _cacheDuration) {
+      return;
+    }
+
     try {
       final response = await _supabaseClient.from('posts').select().order('created_at', ascending: false);
+      final serverPostsData = List<Map<String, dynamic>>.from(response);
 
-      return List<Map<String, dynamic>>.from(response).map((json) => PostModel.fromJson(json)).toList();
+      await _database.transaction(() async {
+        for (final json in serverPostsData) {
+          await _database.into(_database.serverPosts).insertOnConflictUpdate(ServerPostsCompanion(id: Value(json['id'] as int), content: Value(json['content'] as String), status: Value('synced')));
+        }
+      });
+      _lastFetchTime = now;
     } catch (e) {
-      throw Exception("ဆာဗာမှ ဒေတာဆွဲယူ၍ မရပါ - $e");
+      log("📡 Offline: Using server cached table data. $e");
+      rethrow;
     }
   }
 
   @override
-  Stream<List<PostEntity>> watchLocalPosts() {
-    return _database.select(_database.posts).watch().map((driftPosts) {
-      return driftPosts.map((post) => PostModel.fromDrift(post)).toList();
+  Stream<List<PostEntity>> watchCachedServerPosts() {
+    return (_database.select(_database.serverPosts)..orderBy([(t) => OrderingTerm(expression: t.id, mode: OrderingMode.desc)])).watch().map((driftServerPosts) {
+      return driftServerPosts.map((post) {
+        return PostEntity(id: post.id, content: post.content, status: 'synced');
+      }).toList();
     });
   }
 }
