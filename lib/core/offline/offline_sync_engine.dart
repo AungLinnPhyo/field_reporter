@@ -4,6 +4,7 @@ import 'dart:developer' as dev;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../shared/enums/sync_engine_enums.dart';
+import '../extensions/duration_extension.dart';
 import 'sync_config.dart';
 import 'outbox_action_processor.dart';
 import 'offline_cleanup_handler.dart';
@@ -227,6 +228,48 @@ class OfflineSyncEngine {
               '⚠️ Conflict handled. Queue unblocked.',
               name: 'OfflineSyncEngine',
             );
+          } else if (_is5xxOrNetworkError(error)) {
+            final newRetryCount = item.retryCount + 1;
+            final maxRetries = item.maxRetries;
+
+            if (newRetryCount >= maxRetries) {
+              // Retry အကြိမ်ရေ အဆုံးစွန် ထိသွားပါက လုံးဝ လက်လျှော့မည်
+              dev.log(
+                '🚨 Item #${item.id} exceeded max retries. Marking as failed.',
+                name: 'OfflineSyncEngine',
+              );
+              await _outboxRepository.updateOutboxItem(
+                id: item.id,
+                status: 'failed',
+                retryCount: newRetryCount,
+                lastError: error.toString(),
+              );
+              await processor.onFailure(error, payload, newRetryCount);
+            } else {
+              // 🔄 ၅xx / Network Error အတွက် အချိန်တွက်ချက်ခြင်း
+              // final Duration delay = _getExponentialDelay(newRetryCount);
+              final Duration delay = newRetryCount.getExponentialDelay(maxRetries);
+              final DateTime nextRetryTime = DateTime.now().add(delay);
+
+              dev.log(
+                '⏳ 5xx/Network Error တက်သဖြင့် Item #${item.id} ကို $delay အကြာ (အချိန်: $nextRetryTime) မှ ပြန်လည်စမ်းသပ်ပါမည်။ Retry: $newRetryCount/$maxRetries',
+                name: 'OfflineSyncEngine',
+              );
+
+              // 🛠️ အရေးကြီး - သင့် updateOutboxItem သို့မဟုတ် သီးသန့် method တွင်
+              // nextRetryAt သို့မဟုတ် nextRetryTime ကို Database ထဲ ထည့်သွင်းသိမ်းဆည်းပေးရပါမည်။
+              await _outboxRepository.updateOutboxItem(
+                id: item.id,
+                status: 'failed', // stays failed/retryable
+                retryCount: newRetryCount,
+                lastError: error.toString(),
+                // nextRetryAt: nextRetryTime, // 👈 ဤသို့ ကော်လံအသစ် ထည့်သွင်းရန် လိုအပ်ပါသည်
+              );
+            }
+
+            // ကွင်းဆက်တစ်ခုလုံး Error ကြောင့် ဒေါင်းမသွားစေရန်နှင့် ဆက်တိုက် Spam မဖြစ်စေရန် Loop ကို ခေတ္တရပ်နားသည်
+            _updateStatus(SyncEngineEnums.error);
+            break;
           } else {
             // Conflict မဟုတ်ဘဲ သာမန် လိုင်းပြတ်တောက်ခြင်း စသည့် error ဆိုလျှင်
             final newRetryCount = item.retryCount + 1;
@@ -312,6 +355,27 @@ class OfflineSyncEngine {
         errorStr.contains('duplicate key') ||
         errorStr.contains('unique constraint') ||
         errorStr.contains('already exists');
+  }
+
+  bool _is5xxOrNetworkError(Object error) {
+    final errorStr = error.toString().toLowerCase();
+
+    // Supabase/Postgrest Error Status Code စစ်ဆေးခြင်း (5xx)
+    // ဥပမာ - HTTP Status 500, 502, 503, 504 စသည်ဖြင့် ပါဝင်နေပါက
+    final has5xx =
+        errorStr.contains('500') ||
+        errorStr.contains('502') ||
+        errorStr.contains('503') ||
+        errorStr.contains('504');
+
+    // Network ပြတ်တောက်မှု သို့မဟုတ် Timeout ဖြစ်မှုများ စစ်ဆေးခြင်း
+    final isNetwork =
+        errorStr.contains('socketexception') ||
+        errorStr.contains('httpexception') ||
+        errorStr.contains('timeout') ||
+        errorStr.contains('network_error');
+
+    return has5xx || isNetwork;
   }
 
   // bool _isConflictError(Object error) {

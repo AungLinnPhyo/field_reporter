@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart'
+    show Value, StringExpressionOperators, BooleanExpressionOperators;
 
 import '../../../../config/dependency_injections/dependency_injections.dart';
 import '../../../../shared/enums/sync_engine_enums.dart';
@@ -223,7 +224,7 @@ class _ReportNewsScreenState extends ConsumerState<ReportNewsScreen> {
         textColor = Colors.blue.shade800;
         statusText = 'ပို့ရန် စောင့်ဆိုင်းဆဲ';
         badgeIcon = Icons.hourglass_empty_rounded;
-        showActionButtons = false;
+        showActionButtons = true;
         break;
       case 'conflict':
         badgeColor = Colors.red.shade50;
@@ -412,7 +413,20 @@ class _ReportNewsScreenState extends ConsumerState<ReportNewsScreen> {
 
   Future<void> _deletePost(PostEntity post) async {
     final db = ref.read(databaseProvider);
-    await (db.delete(db.posts)..where((t) => t.id.equals(post.id))).go();
+    // await (db.delete(db.posts)..where((t) => t.id.equals(post.id))).go();
+    await db.transaction(() async {
+      // ၁။ posts table ထဲက ဖျက်မည်
+      await (db.delete(db.posts)..where((t) => t.id.equals(post.id))).go();
+
+      // ၂။ outboxQueue ထဲမှာ ပို့ဖို့စောင့်နေတဲ့ Payload ထဲက id ချင်းတူတာကို ရှာပြီး လိုက်ဖျက်မည်
+      // (မှတ်ချက် - payload ကို jsonEncode လုပ်ထားတာကြောင့် LIKE သုံးပြီး ရှာဖျက်ရပါသည်)
+      await (db.delete(db.outboxQueue)..where(
+            (t) =>
+                t.payload.like('%"id":${post.id}%') |
+                t.payload.like('%"id":"${post.id}"%'),
+          ))
+          .go();
+    });
     if (mounted) {
       ScaffoldMessenger.of(
         context,

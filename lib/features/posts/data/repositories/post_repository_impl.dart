@@ -1,11 +1,11 @@
 import 'dart:developer';
 
 import 'package:drift/drift.dart';
-import 'package:field_reporter/core/offline/offline_cleanup_handler.dart';
-import 'package:field_reporter/core/offline/outbox_action_processor.dart';
-import 'package:field_reporter/features/posts/domain/entities/post_entity.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/offline/offline_cleanup_handler.dart';
+import '../../../../core/offline/outbox_action_processor.dart';
+import '../../domain/entities/post_entity.dart';
 import '../../domain/repositories/post_repository.dart';
 import '../data_sources/local_database.dart';
 import '../models/post_model.dart';
