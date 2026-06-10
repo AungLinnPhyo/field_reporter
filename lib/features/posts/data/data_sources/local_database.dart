@@ -5,6 +5,8 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
+import 'package:field_reporter/core/offline/offline_outbox_repository.dart';
+import 'package:field_reporter/core/offline/offline_outbox_item.dart';
 
 part 'local_database.g.dart';
 
@@ -13,8 +15,8 @@ part 'local_database.g.dart';
 class Posts extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get content => text()();
-  // TextColumn get status => text().clientDefault(() => 'pending')(); // Deafult value (Client-side)
-  TextColumn get status => text().withDefault(const Constant('pending'))(); // Deafult value (Server-side)
+  TextColumn get status => text().withDefault(const Constant('pending'))(); // Default value (Server-side)
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)(); // Tracking for cleanup
 }
 
 /// OutboxQueue table
@@ -22,18 +24,99 @@ class OutboxQueue extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get actionType => text()();
   TextColumn get payload => text()();
-  // DateTimeColumn get createdAt => dateTime().clientDefault(() => DateTime.now())(); // Deafult value (Client-side)
-  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)(); // Deafult value (Server-side)
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  IntColumn get retryCount => integer().withDefault(const Constant(0))();
+  IntColumn get maxRetries => integer().withDefault(const Constant(3))();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  TextColumn get lastError => text().nullable()();
+  DateTimeColumn get updatedAt => dateTime().nullable()();
 }
 
 /// Database class
 @DriftDatabase(tables: [Posts, OutboxQueue])
-class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(_openConnection());
+class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
+  AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   // Database Schema Version
   @override
-  int get schemaVersion => 1; 
+  int get schemaVersion => 2; 
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) async {
+      await m.createAll();
+    },
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        // Drop and recreate tables to apply schema modifications
+        await m.deleteTable('posts');
+        await m.deleteTable('outbox_queue');
+        await m.createAll();
+      }
+    },
+  );
+
+  @override
+  Stream<List<OfflineOutboxItem>> watchOutbox() {
+    return select(outboxQueue).watch().map((rows) {
+      return rows.map((row) => OfflineOutboxItem(
+        id: row.id,
+        actionType: row.actionType,
+        payload: row.payload,
+        retryCount: row.retryCount,
+        maxRetries: row.maxRetries,
+        status: row.status,
+        lastError: row.lastError,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      )).toList();
+    });
+  }
+
+  @override
+  Future<OfflineOutboxItem?> getNextSyncableItem() async {
+    final query = select(outboxQueue)
+      ..where((t) => t.status.equals('pending') | (t.status.equals('failed') & t.retryCount.isSmallerThan(t.maxRetries)))
+      ..orderBy([(t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.asc)])
+      ..limit(1);
+    
+    final row = await query.getSingleOrNull();
+    if (row == null) return null;
+
+    return OfflineOutboxItem(
+      id: row.id,
+      actionType: row.actionType,
+      payload: row.payload,
+      retryCount: row.retryCount,
+      maxRetries: row.maxRetries,
+      status: row.status,
+      lastError: row.lastError,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    );
+  }
+
+  @override
+  Future<void> updateOutboxItem({
+    required int id,
+    required String status,
+    required int retryCount,
+    String? lastError,
+  }) async {
+    await (update(outboxQueue)..where((t) => t.id.equals(id))).write(
+      OutboxQueueCompanion(
+        status: Value(status),
+        retryCount: Value(retryCount),
+        lastError: Value(lastError),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> deleteOutboxItem(int id) async {
+    await (delete(outboxQueue)..where((t) => t.id.equals(id))).go();
+  }
 
   Future<void> insertPostToOutbox(String postContent) async {
     await transaction(() async {
@@ -53,6 +136,7 @@ class AppDatabase extends _$AppDatabase {
         OutboxQueueCompanion.insert(
           actionType: 'create_post',
           payload: payload,
+          status: const Value('pending'),
         )
       );
     },);
@@ -67,3 +151,4 @@ LazyDatabase _openConnection() {
     return NativeDatabase.createBackgroundConnection(file);
   });
 }
+

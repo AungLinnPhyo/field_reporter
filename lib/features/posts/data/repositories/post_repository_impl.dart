@@ -1,8 +1,8 @@
-import 'dart:convert';
 import 'dart:developer';
 
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift/drift.dart';
+import 'package:field_reporter/core/offline/offline_cleanup_handler.dart';
+import 'package:field_reporter/core/offline/outbox_action_processor.dart';
 import 'package:field_reporter/features/posts/domain/entities/post_entity.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -13,62 +13,8 @@ import '../models/post_model.dart';
 class PostRepositoryImpl implements PostRepository {
   final AppDatabase _database;
   final SupabaseClient _supabaseClient;
-  bool _isSyncing = false;
 
-  PostRepositoryImpl(this._database, this._supabaseClient) {
-    // _initSyncEngine();
-    // Watch the connectivity
-    Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
-      // အင်တာနက် ပြန်ပွင့်လာပြီဆိုလျှင် (none မဟုတ်တော့လျှင်) Sync Engine ကို လှမ်းနှိုးမည်
-      if (!results.contains(ConnectivityResult.none)) {
-        log("🌐 အင်တာနက် ပြန်ပွင့်လာပြီ - Sync Engine ကို နှိုးနေပါသည်...");
-        triggerSyncEngine();
-      }
-    });
-
-    // 📥 Local DB ရဲ့ Outbox ထဲ သတင်းအသစ် ဝင်လာတိုင်းလည်း လှမ်းနှိုးခြင်း
-    _database.select(_database.outboxQueue).watch().listen((items) {
-      if (items.isNotEmpty) {
-        triggerSyncEngine();
-      }
-    });
-  }
-
-  // Sync Engine
-  Future<void> triggerSyncEngine() async {
-    if (_isSyncing) return;
-    _isSyncing = true;
-
-    // Outbox Queue ထဲမှာ ပို့ဖို့ကျန်တာတွေ အကုန်လှမ်းယူမယ်
-    final outboxItems = await _database.select(_database.outboxQueue).get();
-
-    log("🔄 Sync Engine Triggered - ${outboxItems.length} item(s) to sync");
-
-    for (var item in outboxItems) {
-      try {
-        final Map<String, dynamic> payload = jsonDecode(item.payload);
-        final int localId = payload['id'];
-        final String content = payload['content'];
-
-        log("📤 Syncing Local ID: $localId with content: $content");
-
-        await _supabaseClient.from('posts').insert({'content': content});
-
-        log("📤 Inserted into Supabase for Local ID: $localId");
-
-        await (_database.update(_database.posts)..where((t) => t.id.equals(localId))).write(PostsCompanion(status: const Value('synced')));
-
-        await (_database.delete(_database.outboxQueue)..where((t) => t.id.equals(item.id))).go();
-
-        log("✅ Synced Completed for Local ID: $localId");
-      } catch (e) {
-        log("❌ Sync Engine Paused: $e");
-        break;
-      }
-    }
-
-    _isSyncing = false;
-  }
+  PostRepositoryImpl(this._database, this._supabaseClient);
 
   @override
   Future<void> createPost(String content) async {
@@ -78,9 +24,14 @@ class PostRepositoryImpl implements PostRepository {
   @override
   Future<List<PostEntity>> getServerPosts() async {
     try {
-      final response = await _supabaseClient.from('posts').select().order('created_at', ascending: false);
+      final response = await _supabaseClient
+          .from('posts')
+          .select()
+          .order('created_at', ascending: false);
 
-      return List<Map<String, dynamic>>.from(response).map((json) => PostModel.fromJson(json)).toList();
+      return List<Map<String, dynamic>>.from(
+        response,
+      ).map((json) => PostModel.fromJson(json)).toList();
     } catch (e) {
       throw Exception("ဆာဗာမှ ဒေတာဆွဲယူ၍ မရပါ - $e");
     }
@@ -91,5 +42,98 @@ class PostRepositoryImpl implements PostRepository {
     return _database.select(_database.posts).watch().map((driftPosts) {
       return driftPosts.map((post) => PostModel.fromDrift(post)).toList();
     });
+  }
+}
+
+/// Processor to sync posts added to the outbox queue
+class PostSyncProcessor implements OutboxActionProcessor {
+  final AppDatabase _database;
+  final SupabaseClient _supabaseClient;
+
+  PostSyncProcessor(this._database, this._supabaseClient);
+
+  @override
+  String get actionType => 'create_post';
+
+  @override
+  Future<void> process(Map<String, dynamic> payload) async {
+    final String content = payload['content'];
+    final int localId = payload['id'];
+
+    log(
+      "📤 [PostSyncProcessor] Syncing Post ID: $localId (content: $content)",
+      name: 'PostSyncProcessor',
+    );
+
+    // Sync to Supabase. This can throw network exceptions or DB unique constraint violations
+    await _supabaseClient.from('posts').insert({'content': content});
+
+    log(
+      "✅ [PostSyncProcessor] Synced to Supabase for local ID: $localId",
+      name: 'PostSyncProcessor',
+    );
+
+    // Update local post status to synced
+    await (_database.update(_database.posts)
+          ..where((t) => t.id.equals(localId)))
+        .write(const PostsCompanion(status: Value('synced')));
+  }
+
+  @override
+  Future<void> onConflict(Object error, Map<String, dynamic> payload) async {
+    final int localId = payload['id'];
+    log(
+      "⚠️ [PostSyncProcessor] Conflict encountered for local ID $localId: $error",
+      name: 'PostSyncProcessor',
+    );
+
+    // Update local post status to conflict
+    await (_database.update(_database.posts)
+          ..where((t) => t.id.equals(localId)))
+        .write(const PostsCompanion(status: Value('conflict')));
+  }
+
+  @override
+  Future<void> onFailure(
+    Object error,
+    Map<String, dynamic> payload,
+    int currentRetries,
+  ) async {
+    final int localId = payload['id'];
+    log(
+      "❌ [PostSyncProcessor] Permanent failure for local ID $localId (Retries: $currentRetries): $error",
+      name: 'PostSyncProcessor',
+    );
+
+    // Update local post status to failed
+    await (_database.update(_database.posts)
+          ..where((t) => t.id.equals(localId)))
+        .write(const PostsCompanion(status: Value('failed')));
+  }
+}
+
+/// Database cleaner for synced posts older than the retention duration
+class PostCleanupHandler implements OfflineCleanupHandler {
+  final AppDatabase _database;
+
+  PostCleanupHandler(this._database);
+
+  @override
+  Future<void> cleanup(Duration retentionDuration) async {
+    final cutoffDate = DateTime.now().subtract(retentionDuration);
+
+    // Delete synced posts older than retention period
+    final count =
+        await (_database.delete(_database.posts)..where(
+              (t) =>
+                  t.status.equals('synced') &
+                  t.createdAt.isSmallerThanValue(cutoffDate),
+            ))
+            .go();
+
+    log(
+      "🧹 [PostCleanupHandler] Deleted $count synced posts older than threshold",
+      name: 'PostCleanupHandler',
+    );
   }
 }
