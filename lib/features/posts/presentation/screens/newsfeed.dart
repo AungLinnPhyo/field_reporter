@@ -9,10 +9,10 @@ class Newsfeed extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final serverPostsAsync = ref.watch(serverPostsFutureProvider);
+    final serverPostsAsync = ref.watch(serverPostsStreamProvider);
 
     return RefreshIndicator(
-      onRefresh: () => ref.refresh(serverPostsFutureProvider.future),
+      onRefresh: () => ref.refresh(serverPostsStreamProvider.future),
       child: serverPostsAsync.when(
         skipLoadingOnRefresh: false,
         skipLoadingOnReload: false,
@@ -132,7 +132,7 @@ class Newsfeed extends ConsumerWidget {
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
-              onPressed: () => ref.refresh(serverPostsFutureProvider),
+              onPressed: () => ref.refresh(serverPostsStreamProvider),
               icon: const Icon(Icons.refresh),
               label: const Text('Try Again'),
               style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white),

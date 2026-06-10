@@ -8,7 +8,7 @@ class PostUsecase {
 
   Future<void> createPost(String content) async => await _postRepository.createPost(content);
 
-  Future<List<PostEntity>> getServerPosts() async => await _postRepository.getServerPosts();
+  Stream<List<PostEntity>> getServerPosts() => _postRepository.getServerPosts();
 
   // Stream<List<PostEntity>> watchLocalPosts() async => await _postRepository.watchLocalPosts();
 }

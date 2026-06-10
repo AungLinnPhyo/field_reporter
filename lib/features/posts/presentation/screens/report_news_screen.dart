@@ -18,300 +18,396 @@ class ReportNewsScreen extends ConsumerStatefulWidget {
 }
 
 class _ReportNewsScreenState extends ConsumerState<ReportNewsScreen> {
+  int _currentIndex = 2; // Default အနေနဲ့ Outbox (Index 2) ကို ဖွင့်ထားမည်
   final TextEditingController _controller = TextEditingController();
+
   @override
   Widget build(BuildContext context) {
-    // Watch sync status reactively
+    // Sync Status နှင့် Sync Engine ကို နားထောင်ထားခြင်း
     final syncStatusAsync = ref.watch(syncStatusProvider);
-    // Keep sync engine alive and listening
     ref.watch(syncEngineProvider);
 
+    // Bottom Navigation အလိုက် ပြသမည့် Screen များ စာရင်း
+    final List<Widget> screens = [
+      _buildReportTab(), // Index 0: Report တင်သည့်နေရာ
+      const Newsfeed(), // Index 1: Feed ကြည့်သည့်နေရာ
+      _buildOutboxTab(), // Index 2: ထွက်စာ (Outbox) စာရင်း
+    ];
+
+    return Scaffold(
+      backgroundColor: Colors.grey.shade50,
+      appBar: AppBar(
+        title: Text(
+          _getAppBarTitle(),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+        ),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+        actions: [_buildSyncStatusIndicator(syncStatusAsync)],
+      ),
+      body: IndexedStack(index: _currentIndex, children: screens),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        selectedItemColor: Colors.deepPurple,
+        unselectedItemColor: Colors.grey,
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.edit_note_rounded),
+            label: 'Report',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.feed_outlined),
+            label: 'Feed',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.outbox_rounded),
+            label: 'Outbox',
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getAppBarTitle() {
+    switch (_currentIndex) {
+      case 0:
+        return 'Report News';
+      case 1:
+        return 'Newsfeed';
+      case 2:
+        return 'ထွက်စာ (Outbox)';
+      default:
+        return 'Report News';
+    }
+  }
+
+  // ==========================================
+  // ၁။ REPORT TAB UI (သတင်းအသစ်တင်ရန်)
+  // ==========================================
+  Widget _buildReportTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 16.0,
+        children: [
+          TextField(
+            controller: _controller,
+            decoration: const InputDecoration(
+              hintText: 'သတင်းအချက်အလက်များ ရေးသားရန်...',
+              border: OutlineInputBorder(),
+              filled: true,
+              fillColor: Colors.white,
+            ),
+            maxLines: 4,
+          ),
+          Center(
+            child: ElevatedButton.icon(
+              onPressed: _submitPost,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.deepPurple,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+              ),
+              icon: const Icon(Icons.send_rounded),
+              label: const Text('သတင်းပေးပို့မည်'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // ၂။ OUTBOX LIST TAB UI (ဒီဇိုင်းအသစ်)
+  // ==========================================
+  Widget _buildOutboxTab() {
     final postsAsyncValue = ref.watch(postsStreamProvider);
 
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Report News'),
-          actions: [_buildSyncStatusIndicator(syncStatusAsync)],
-          bottom: const TabBar(
-            tabs: [
-              Tab(icon: Icon(Icons.edit), text: 'Report'),
-              Tab(icon: Icon(Icons.feed), text: 'Feed'),
-            ],
-          ),
-        ),
-        body: TabBarView(
+    return postsAsyncValue.when(
+      data: (posts) {
+        if (posts.isEmpty) {
+          return const Center(child: Text('ထွက်စာဗန်းထဲတွင် သတင်းမရှိသေးပါ။'));
+        }
+
+        // 'synced' မဖြစ်သေးတဲ့ ကောင်တွေကိုပဲ Outbox ထဲမှာ ပြပါမယ်
+        final outboxItems = posts.where((p) => p.status != 'synced').toList();
+
+        if (outboxItems.isEmpty) {
+          return const Center(
+            child: Text('ထွက်စာဗန်း သန့်ရှင်းနေပါသည်။ အားလုံး ပို့ပြီးပါပြီ။'),
+          );
+        }
+
+        return Column(
           children: [
-            // Report Tab
+            // အပေါ်က ကောင်ရေပြတဲ့ Header လေး (ဥပမာ - ၃ ခု ကျန်နေရီ)
             Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                spacing: 16.0,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16.0,
+                vertical: 10,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextField(
-                    controller: _controller,
-                    decoration: const InputDecoration(
-                      hintText: 'သတင်းအချက်အလက်များ ရေးသားရန်...',
-                      border: OutlineInputBorder(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
                     ),
-                    maxLines: 4,
-                  ),
-
-                  Center(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        final text = _controller.text;
-                        if (text.trim().isEmpty)
-                          return; // Prevent sending empty news
-
-                        // Call the use case through the provider
-                        await ref.read(postUsecaseProvider).createPost(text);
-
-                        _controller.clear();
-
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('သတင်းပေးပို့ပြီးပါပြီ'),
-                            ),
-                          );
-                        }
-                      },
-                      child: const Text('သတင်းပေးပို့မည်'),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(20),
                     ),
-                  ),
-
-                  const Divider(height: 10),
-
-                  const Text(
-                    'မကြာသေးမီက ပေးပို့ထားသော သတင်းများ',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-
-                  Expanded(
-                    child: postsAsyncValue.when(
-                      data: (posts) {
-                        if (posts.isEmpty) {
-                          return const Center(
-                            child: Text('ပေးပို့ထားသော သတင်းမရှိသေးပါ။'),
-                          );
-                        }
-
-                        return ListView.builder(
-                          itemCount: posts.length,
-                          itemBuilder: (context, index) {
-                            final post = posts[index];
-
-                            Color statusColor;
-                            IconData statusIcon;
-                            String statusText;
-                            bool isActionable = false;
-
-                            switch (post.status) {
-                              case 'pending':
-                                statusColor = Colors.orange;
-                                statusIcon = Icons.access_time_rounded;
-                                statusText = 'Pending';
-                                break;
-                              case 'conflict':
-                                statusColor = Colors.red;
-                                statusIcon = Icons.warning_amber_rounded;
-                                statusText = 'Conflict';
-                                isActionable = true;
-                                break;
-                              case 'failed':
-                                statusColor = Colors.redAccent;
-                                statusIcon = Icons.error_outline_rounded;
-                                statusText = 'Sync Failed';
-                                isActionable = true;
-                                break;
-                              case 'synced':
-                              default:
-                                statusColor = Colors.green;
-                                statusIcon = Icons.check_circle_rounded;
-                                statusText = 'Synced';
-                                break;
-                            }
-
-                            return Card(
-                              margin: const EdgeInsets.symmetric(vertical: 6),
-                              elevation: isActionable ? 3 : 1,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                side: isActionable
-                                    ? BorderSide(
-                                        color: statusColor.withOpacity(0.5),
-                                        width: 1.5,
-                                      )
-                                    : BorderSide.none,
-                              ),
-                              child: ListTile(
-                                subtitle: Text(post.content),
-                                title: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          statusText,
-                                          style: TextStyle(
-                                            color: statusColor,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Icon(
-                                          size: 15,
-                                          statusIcon,
-                                          color: statusColor,
-                                        ),
-                                      ],
-                                    ),
-                                    Text(
-                                      _formatTime(post.createdAt),
-                                      style: TextStyle(
-                                        color: Colors.grey.shade500,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                onTap: isActionable
-                                    ? () => _showResolveDialog(context, post)
-                                    : null,
-                              ),
-                            );
-                          },
-                        );
-                      },
-                      loading: () =>
-                          const Center(child: CircularProgressIndicator()),
-                      error: (error, stack) =>
-                          Center(child: Text('Error loading posts: $error')),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.pending_actions,
+                          size: 16,
+                          color: Colors.black54,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${outboxItems.length} ခု ကျန်နေသေးသည်',
+                          style: TextStyle(fontSize: 12, color: Colors.black54),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
-
-            // Newsfeed
-            const Newsfeed(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSyncStatusIndicator(
-    AsyncValue<SyncEngineEnums> syncStatusAsync,
-  ) {
-    return syncStatusAsync.when(
-      data: (status) {
-        Color color;
-        IconData icon;
-        String tooltip;
-
-        switch (status) {
-          case SyncEngineEnums.syncing:
-            color = Colors.blue;
-            icon = Icons.sync;
-            tooltip = 'Syncing...';
-            break;
-          case SyncEngineEnums.offline:
-            color = Colors.orange;
-            icon = Icons.cloud_off;
-            tooltip = 'Offline Mode';
-            break;
-          case SyncEngineEnums.error:
-            color = Colors.red;
-            icon = Icons.sync_problem;
-            tooltip = 'Sync Paused (Error)';
-            break;
-          case SyncEngineEnums.idle:
-          default:
-            color = Colors.green;
-            icon = Icons.cloud_done;
-            tooltip = 'Connected & Synced';
-            break;
-        }
-
-        return IconButton(
-          icon: Icon(icon, color: color),
-          tooltip: tooltip,
-          onPressed: () {
-            ref.read(syncEngineProvider).triggerSync();
-          },
-        );
-      },
-      loading: () => const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16.0),
-        child: SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      ),
-      error: (_, __) => const Icon(Icons.sync_problem, color: Colors.red),
-    );
-  }
-
-  void _showResolveDialog(BuildContext context, PostEntity post) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(
-                post.status == 'conflict'
-                    ? Icons.warning_amber_rounded
-                    : Icons.error_outline_rounded,
-                color: Colors.red,
-              ),
-              const SizedBox(width: 8),
-              const Text('သတင်းပေးပို့မှု ပြဿနာ'),
-            ],
-          ),
-          content: Text(
-            post.status == 'conflict'
-                ? 'ဆာဗာရှိ အချက်အလက်နှင့် တိုက်ဆိုင်နေပါသည် (ဥပမာ NRC တူနေခြင်း သို့မဟုတ် ဒေတာထပ်နေခြင်း)။ အချက်အလက်ကို ပြင်ဆင်ပြီး ပြန်လည်ပေးပို့ပါရန် သို့မဟုတ် ဖျက်ပစ်ပါရန်။'
-                : 'အင်တာနက်ချိတ်ဆက်မှု ပြဿနာကြောင့် ဒေတာမရောက်ရှိပါ။ ပြန်လည်ကြိုးစားရန် သို့မဟုတ် ဖျက်ပစ်ပါရန်။',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _deletePost(post);
-              },
-              child: const Text(
-                'ဖျက်ပစ်မည်',
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(dialogContext);
-                _showEditDialog(context, post);
-              },
-              child: const Text('ပြင်ဆင်မည်'),
-            ),
-            if (post.status == 'failed')
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  _retryPost(post);
+            // ကတ်ပြားစာရင်းများ
+            Expanded(
+              child: ListView.builder(
+                itemCount: outboxItems.length,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 4,
+                ),
+                itemBuilder: (context, index) {
+                  final post = outboxItems[index];
+                  return _buildOutboxCard(post);
                 },
-                child: const Text('ထပ်မံကြိုးစားမည်'),
               ),
+            ),
           ],
         );
       },
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => Center(child: Text('Error: $error')),
     );
+  }
+
+  Widget _buildOutboxCard(PostEntity post) {
+    Color badgeColor;
+    Color textColor;
+    String statusText;
+    IconData? badgeIcon;
+    bool showActionButtons = false;
+
+    // အခြေအနေအလိုက် Design Badge ပြောင်းလဲခြင်း
+    switch (post.status) {
+      case 'pending':
+        badgeColor = Colors.blue.shade50;
+        textColor = Colors.blue.shade800;
+        statusText = 'ပို့ရန် စောင့်ဆိုင်းဆဲ';
+        badgeIcon = Icons.hourglass_empty_rounded;
+        showActionButtons = false;
+        break;
+      case 'conflict':
+        badgeColor = Colors.red.shade50;
+        textColor = Colors.red.shade800;
+        statusText = 'ဒေတာထပ်နေပါသည်';
+        badgeIcon = Icons.warning_amber_rounded;
+        showActionButtons = true;
+        break;
+      case 'failed':
+        badgeColor = Colors.red.shade50;
+        textColor = Colors.red.shade800;
+        statusText = 'မအောင်မြင်ပါ';
+        badgeIcon = Icons.error_outline_rounded;
+        showActionButtons = true;
+        break;
+      default: // 'syncing' သို့မဟုတ် တခြားအခြေအနေ
+        badgeColor = Colors.blue.shade50;
+        textColor = Colors.blue.shade800;
+        statusText = 'ပို့ဆောင်နေဆဲ';
+        badgeIcon = Icons.refresh_rounded;
+    }
+
+    return Card(
+      color: Colors.white,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.grey.shade200, width: 1),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header: Profile Icon + Title + Status Badge
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: Colors.deepPurple.shade50,
+                  radius: 20,
+                  child: const Icon(Icons.person, color: Colors.deepPurple),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Field Reporter',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      Text(
+                        'Verified Source',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                // Status Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: badgeColor,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(badgeIcon, size: 14, color: textColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        statusText,
+                        style: TextStyle(
+                          color: textColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12.0),
+              child: Divider(height: 1),
+            ),
+            // စာသား
+            Text(
+              post.content,
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.black87,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 6),
+            // Report ID & Time
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Report ID: #${post.id}',
+                  style: const TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+                Text(
+                  _formatTime(post.createdAt),
+                  style: const TextStyle(color: Colors.grey, fontSize: 12),
+                ),
+              ],
+            ),
+            // ဖျက်မည်/ပြန်ပို့မည် Action Buttons
+            if (showActionButtons) ...[
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                spacing: 12.0,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => _deletePost(post),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.grey.shade700,
+                      side: BorderSide(color: Colors.grey.shade300),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    child: const Text('ဖျက်ပစ်မည်'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => _retryPost(post),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('ပြန်ပို့မည်'),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==========================================
+  // ၃။ HELPERS & LOGIC METHODS
+  // ==========================================
+  Future<void> _submitPost() async {
+    final text = _controller.text;
+    if (text.trim().isEmpty) return;
+
+    await ref.read(postUsecaseProvider).createPost(text);
+    _controller.clear();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('သတင်းကို အော့ဖ်လိုင်းဗန်းထဲသို့ ထည့်ပြီးပါပြီ။'),
+        ),
+      );
+      setState(() {
+        _currentIndex =
+            2; // တန်းစီစာရင်း (Outbox) တက်ဘ်သို့ တန်းရွှေ့ပြောင်းပေးမည်
+      });
+    }
   }
 
   Future<void> _deletePost(PostEntity post) async {
@@ -340,70 +436,44 @@ class _ReportNewsScreenState extends ConsumerState<ReportNewsScreen> {
             ),
           );
     });
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('သတင်းပေးပို့ရန် ထပ်မံကြိုးစားနေပါသည်...'),
-        ),
-      );
-    }
+    ref.read(syncEngineProvider).triggerSync();
   }
 
-  void _showEditDialog(BuildContext context, PostEntity post) {
-    final editController = TextEditingController(text: post.content);
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('သတင်းပြင်ဆင်ရန်'),
-          content: TextField(
-            controller: editController,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: 'ပြင်ဆင်ထားသော သတင်း ရေးသားရန်...',
+  Widget _buildSyncStatusIndicator(
+    AsyncValue<SyncEngineEnums> syncStatusAsync,
+  ) {
+    return syncStatusAsync.when(
+      data: (status) {
+        Color color = Colors.green;
+        IconData icon = Icons.cloud_done;
+        if (status == SyncEngineEnums.syncing) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.only(right: 16.0),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
             ),
-            maxLines: 3,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('မလုပ်တော့ပါ'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final newContent = editController.text;
-                if (newContent.trim().isEmpty) return;
-                Navigator.pop(dialogContext);
+          );
+        }
+        if (status == SyncEngineEnums.offline) {
+          color = Colors.orange;
+          icon = Icons.cloud_off;
+        }
+        if (status == SyncEngineEnums.error) {
+          color = Colors.red;
+          icon = Icons.sync_problem;
+        }
 
-                final db = ref.read(databaseProvider);
-                await db.transaction(() async {
-                  await (db.update(
-                    db.posts,
-                  )..where((t) => t.id.equals(post.id))).write(
-                    PostsCompanion(
-                      content: Value(newContent),
-                      status: const Value('pending'),
-                    ),
-                  );
-                  await db
-                      .into(db.outboxQueue)
-                      .insert(
-                        OutboxQueueCompanion.insert(
-                          actionType: 'create_post',
-                          payload: jsonEncode({
-                            'id': post.id,
-                            'content': newContent,
-                          }),
-                          status: const Value('pending'),
-                        ),
-                      );
-                });
-              },
-              child: const Text('သိမ်းဆည်းမည်'),
-            ),
-          ],
+        return IconButton(
+          icon: Icon(icon, color: color),
+          onPressed: () => ref.read(syncEngineProvider).triggerSync(),
         );
       },
+      loading: () => const Icon(Icons.sync, color: Colors.grey),
+      error: (_, __) => const Icon(Icons.sync_problem, color: Colors.red),
     );
   }
 

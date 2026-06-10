@@ -22,16 +22,25 @@ class PostRepositoryImpl implements PostRepository {
   }
 
   @override
-  Future<List<PostEntity>> getServerPosts() async {
+  Stream<List<PostEntity>> getServerPosts() {
     try {
-      final response = await _supabaseClient
+      final response = _supabaseClient
           .from('posts')
-          .select()
+          .stream(primaryKey: ['id'])
           .order('created_at', ascending: false);
 
-      return List<Map<String, dynamic>>.from(
-        response,
-      ).map((json) => PostModel.fromJson(json)).toList();
+      return response.map((json) {
+        // 1. Raw JSON List မှ List<Map<String, dynamic>> ကို သေချာယူသည်
+        final List rawList = json as List;
+
+        // 2. Map<String, dynamic> စာရင်းတစ်ခုအဖြစ် ပြောင်းပေးသည်
+        final List<Map<String, dynamic>> jsonList = rawList
+            .map((e) => e as Map<String, dynamic>)
+            .toList();
+
+        // 3. အစအဆုံး စီထားသောစာရင်းအဖြစ် ပြောင်းသည်
+        return jsonList.map((json) => PostModel.fromJson(json)).toList();
+      });
     } catch (e) {
       throw Exception("ဆာဗာမှ ဒေတာဆွဲယူ၍ မရပါ - $e");
     }

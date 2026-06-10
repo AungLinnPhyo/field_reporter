@@ -13,9 +13,15 @@ final postsStreamProvider = StreamProvider<List<PostEntity>>((ref) {
 });
 
 /// Server Posts များကို ဆွဲယူရန် Future
-final serverPostsFutureProvider = FutureProvider<List<PostEntity>>((ref) async {
-  final useCase = ref.watch(postUsecaseProvider); // DI မှ Usecase ကို ယူသည်
-  return await useCase.getServerPosts();
+// final serverPostsFutureProvider = FutureProvider<List<PostEntity>>((ref) async {
+//   final useCase = ref.watch(postUsecaseProvider); // DI မှ Usecase ကို ယူသည်
+//   return await useCase.getServerPosts();
+// });
+final serverPostsStreamProvider = StreamProvider<List<PostEntity>>((ref) {
+  // သင့်ရဲ့ UseCase သို့မဟုတ် Repository ထံမှ Supabase Stream ကို လှမ်းယူခြင်း
+  // (ဥပမာ - supabase.from('posts').stream(primaryKey: ['id']).order('created_at').map(...))
+  final useCase = ref.watch(postUsecaseProvider); 
+  return useCase.getServerPosts(); 
 });
 
 /// Sync Engine ၏ အခြေအနေ စောင့်ကြည့်ရန် Stream

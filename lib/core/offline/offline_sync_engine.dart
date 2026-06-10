@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:developer' as dev;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:dio/dio.dart';
 import '../../shared/enums/sync_engine_enums.dart';
 import 'sync_config.dart';
 import 'outbox_action_processor.dart';
@@ -304,35 +303,35 @@ class OfflineSyncEngine {
   }
 
   /// Detects SQLite and PostgreSQL unique constraint conflicts
-  // bool _isConflictError(Object error) {
-  //   final errorStr = error.toString().toLowerCase();
-  //   // 23505 is PostgreSQL/Supabase code for unique_violation.
-  //   // 'duplicate key' is common Postgres/SQLite error text.
-  //   // 'unique constraint' is standard SQLite constraint failure text.
-  //   return errorStr.contains('23505') ||
-  //       errorStr.contains('duplicate key') ||
-  //       errorStr.contains('unique constraint') ||
-  //       errorStr.contains('already exists');
-  // }
-
   bool _isConflictError(Object error) {
-    // ၁။ တက်လာတဲ့ error က DioException ဟုတ်မဟုတ် အရင်စစ်တယ်
-    if (error is DioException) {
-      // ၂။ Server က ပြန်ပေးတဲ့ HTTP Status Code က 409 Conflict ဟုတ်မဟုတ် စစ်တယ်
-      if (error.response?.statusCode == 409) {
-        return true;
-      }
-
-      // ၃။ သို့မဟုတ် Custom Error Code ပါလာရင် ၎င်းကို စစ်တယ်
-      final data = error.response?.data;
-      if (data is Map<String, dynamic> &&
-          data['error_code'] == 'DUPLICATE_USERNAME') {
-        return true;
-      }
-    }
-
-    return false;
+    final errorStr = error.toString().toLowerCase();
+    // 23505 is PostgreSQL/Supabase code for unique_violation.
+    // 'duplicate key' is common Postgres/SQLite error text.
+    // 'unique constraint' is standard SQLite constraint failure text.
+    return errorStr.contains('23505') ||
+        errorStr.contains('duplicate key') ||
+        errorStr.contains('unique constraint') ||
+        errorStr.contains('already exists');
   }
+
+  // bool _isConflictError(Object error) {
+  //   // ၁။ တက်လာတဲ့ error က DioException ဟုတ်မဟုတ် အရင်စစ်တယ်
+  //   if (error is DioException) {
+  //     // ၂။ Server က ပြန်ပေးတဲ့ HTTP Status Code က 409 Conflict ဟုတ်မဟုတ် စစ်တယ်
+  //     if (error.response?.statusCode == 409) {
+  //       return true;
+  //     }
+
+  //     // ၃။ သို့မဟုတ် Custom Error Code ပါလာရင် ၎င်းကို စစ်တယ်
+  //     final data = error.response?.data;
+  //     if (data is Map<String, dynamic> &&
+  //         data['error_code'] == 'DUPLICATE_USERNAME') {
+  //       return true;
+  //     }
+  //   }
+
+  //   return false;
+  // }
 
   void dispose() {
     _connectivitySub?.cancel();
