@@ -1,10 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:field_reporter/core/offline/offline_sync_engine.dart';
-import 'package:field_reporter/features/posts/data/data_sources/local_database.dart';
 import 'package:drift/drift.dart' show Value;
 
+import '../../../../config/dependency_injections/dependency_injections.dart';
+import '../../../../shared/enums/sync_engine_enums.dart';
+import '../../data/data_sources/local_database.dart';
 import '../../domain/entities/post_entity.dart';
 import '../providers/post_providers.dart';
 import 'newsfeed.dart';
@@ -207,7 +208,7 @@ class _ReportNewsScreenState extends ConsumerState<ReportNewsScreen> {
   }
 
   Widget _buildSyncStatusIndicator(
-    AsyncValue<SyncEngineStatus> syncStatusAsync,
+    AsyncValue<SyncEngineEnums> syncStatusAsync,
   ) {
     return syncStatusAsync.when(
       data: (status) {
@@ -216,22 +217,22 @@ class _ReportNewsScreenState extends ConsumerState<ReportNewsScreen> {
         String tooltip;
 
         switch (status) {
-          case SyncEngineStatus.syncing:
+          case SyncEngineEnums.syncing:
             color = Colors.blue;
             icon = Icons.sync;
             tooltip = 'Syncing...';
             break;
-          case SyncEngineStatus.offline:
+          case SyncEngineEnums.offline:
             color = Colors.orange;
             icon = Icons.cloud_off;
             tooltip = 'Offline Mode';
             break;
-          case SyncEngineStatus.error:
+          case SyncEngineEnums.error:
             color = Colors.red;
             icon = Icons.sync_problem;
             tooltip = 'Sync Paused (Error)';
             break;
-          case SyncEngineStatus.idle:
+          case SyncEngineEnums.idle:
           default:
             color = Colors.green;
             icon = Icons.cloud_done;

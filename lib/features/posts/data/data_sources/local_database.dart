@@ -56,6 +56,7 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
     },
   );
 
+  // OutboxQueue Table ထဲမှာ ဒေတာအပြောင်းအလဲ ရှိ၊ မရှိကိုအမြဲ စောင့်ကြည့်
   @override
   Stream<List<OfflineOutboxItem>> watchOutbox() {
     return select(outboxQueue).watch().map((rows) {
@@ -73,6 +74,7 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
     });
   }
 
+  // ဆာဗာကို ပို့ဖို့ နောက်ထပ် အလှည့်ကျမယ့် Item တစ်ခုတည်း (limit(1)) ကို ရှာဖွေပေးတာ ဖြစ်ပါတယ်။
   @override
   Future<OfflineOutboxItem?> getNextSyncableItem() async {
     final query = select(outboxQueue)
@@ -96,6 +98,7 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
     );
   }
 
+  // OutboxQueue ထဲက Item တစ်ခုရဲ့ အခြေအနေ (Status, Retry Count စသည်) ကို ပြင်ဆင်သတ်မှတ်ပေးခြင်း
   @override
   Future<void> updateOutboxItem({
     required int id,
@@ -113,11 +116,13 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
     );
   }
 
+  // OutboxQueue ထဲက Item ကို အပြီးအပိုင် ဖျက်ထုတ်ပေးခြင်း
   @override
   Future<void> deleteOutboxItem(int id) async {
     await (delete(outboxQueue)..where((t) => t.id.equals(id))).go();
   }
 
+  // Post တစ်ခုကို Outbox ထဲထည့်ဖို့ စီစဉ်ပေးခြင်း
   Future<void> insertPostToOutbox(String postContent) async {
     await transaction(() async {
       final postId = await into(posts).insert(
@@ -143,7 +148,7 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
   }
 }
 
-// Define a path to store the database
+// SQLite ဒေတာဘေ့စ် သိမ်းဆည်းမယ့်နေရာ (Path) ကို define ပေးခြင်း
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
     final dbFolder = await getApplicationDocumentsDirectory();

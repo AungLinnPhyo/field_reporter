@@ -45,7 +45,7 @@ class PostRepositoryImpl implements PostRepository {
   }
 }
 
-/// Processor to sync posts added to the outbox queue
+/// Outbox queue ထဲက ပို့စ်တွေကို နောက်ကွယ်ကနေ ဆာဗာပေါ် လိုက်တင်ပေးမည့် Processor
 class PostSyncProcessor implements OutboxActionProcessor {
   final AppDatabase _database;
   final SupabaseClient _supabaseClient;
@@ -120,9 +120,10 @@ class PostCleanupHandler implements OfflineCleanupHandler {
 
   @override
   Future<void> cleanup(Duration retentionDuration) async {
+    // လက်ရှိအချိန်ကနေ သတ်မှတ်ထားတဲ့ သက်တမ်း (ဥပမာ ရက်ပေါင်း ၃၀) ကို နှုတ်ပြီး သတ်မှတ်ရက် တစ်ခုတွက်ထုတ်သည်
     final cutoffDate = DateTime.now().subtract(retentionDuration);
 
-    // Delete synced posts older than retention period
+    // သက်တမ်းကျော်နေတဲ့ Data တွေကို ဖျက်ထုတ်သည်
     final count =
         await (_database.delete(_database.posts)..where(
               (t) =>
