@@ -3,4 +3,5 @@ enum SyncEngineEnums {
   syncing,
   offline,
   error,
+  waitingForRetry,
 }

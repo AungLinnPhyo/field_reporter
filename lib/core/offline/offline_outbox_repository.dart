@@ -14,6 +14,7 @@ abstract class OfflineOutboxRepository {
     required String status,
     required int retryCount,
     String? lastError,
+    DateTime? nextRetryAt,
   });
 
   /// Deletes an outbox item from the queue.

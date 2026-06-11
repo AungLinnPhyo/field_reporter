@@ -17,6 +17,7 @@ class Posts extends Table {
   TextColumn get content => text()();
   TextColumn get status => text().withDefault(const Constant('pending'))(); // Default value (Server-side)
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)(); // Tracking for cleanup
+  DateTimeColumn get nextRetryAt => dateTime().nullable()();
 }
 
 /// OutboxQueue table
@@ -29,6 +30,7 @@ class OutboxQueue extends Table {
   IntColumn get maxRetries => integer().withDefault(const Constant(3))();
   TextColumn get status => text().withDefault(const Constant('pending'))();
   TextColumn get lastError => text().nullable()();
+  DateTimeColumn get nextRetryAt => dateTime().nullable()();
   DateTimeColumn get updatedAt => dateTime().nullable()();
 }
 
@@ -39,7 +41,7 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
 
   // Database Schema Version
   @override
-  int get schemaVersion => 2; 
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -52,6 +54,9 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
         await m.deleteTable('posts');
         await m.deleteTable('outbox_queue');
         await m.createAll();
+      } else if (from < 3) {
+        await m.addColumn(posts, posts.nextRetryAt);
+        await m.addColumn(outboxQueue, outboxQueue.nextRetryAt);
       }
     },
   );
@@ -60,28 +65,34 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
   @override
   Stream<List<OfflineOutboxItem>> watchOutbox() {
     return select(outboxQueue).watch().map((rows) {
-      return rows.map((row) => OfflineOutboxItem(
-        id: row.id,
-        actionType: row.actionType,
-        payload: row.payload,
-        retryCount: row.retryCount,
-        maxRetries: row.maxRetries,
-        status: row.status,
-        lastError: row.lastError,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      )).toList();
+      return rows
+          .map(
+            (row) => OfflineOutboxItem(
+              id: row.id,
+              actionType: row.actionType,
+              payload: row.payload,
+              retryCount: row.retryCount,
+              maxRetries: row.maxRetries,
+              status: row.status,
+              lastError: row.lastError,
+              createdAt: row.createdAt,
+              nextRetryAt: row.nextRetryAt,
+              updatedAt: row.updatedAt,
+            ),
+          )
+          .toList();
     });
   }
 
   // ဆာဗာကို ပို့ဖို့ နောက်ထပ် အလှည့်ကျမယ့် Item တစ်ခုတည်း (limit(1)) ကို ရှာဖွေပေးတာ ဖြစ်ပါတယ်။
   @override
   Future<OfflineOutboxItem?> getNextSyncableItem() async {
+    final now = DateTime.now();
     final query = select(outboxQueue)
-      ..where((t) => t.status.equals('pending') | (t.status.equals('failed') & t.retryCount.isSmallerThan(t.maxRetries)))
+      ..where((t) => (t.status.equals('pending') | (t.status.equals('failed') & t.retryCount.isSmallerThan(t.maxRetries))) & (t.nextRetryAt.isNull() | t.nextRetryAt.isSmallerThanValue(now)))
       ..orderBy([(t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.asc)])
       ..limit(1);
-    
+
     final row = await query.getSingleOrNull();
     if (row == null) return null;
 
@@ -94,25 +105,16 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
       status: row.status,
       lastError: row.lastError,
       createdAt: row.createdAt,
+      nextRetryAt: row.nextRetryAt,
       updatedAt: row.updatedAt,
     );
   }
 
   // OutboxQueue ထဲက Item တစ်ခုရဲ့ အခြေအနေ (Status, Retry Count စသည်) ကို ပြင်ဆင်သတ်မှတ်ပေးခြင်း
   @override
-  Future<void> updateOutboxItem({
-    required int id,
-    required String status,
-    required int retryCount,
-    String? lastError,
-  }) async {
+  Future<void> updateOutboxItem({required int id, required String status, required int retryCount, String? lastError, DateTime? nextRetryAt}) async {
     await (update(outboxQueue)..where((t) => t.id.equals(id))).write(
-      OutboxQueueCompanion(
-        status: Value(status),
-        retryCount: Value(retryCount),
-        lastError: Value(lastError),
-        updatedAt: Value(DateTime.now()),
-      ),
+      OutboxQueueCompanion(status: Value(status), retryCount: Value(retryCount), lastError: Value(lastError), nextRetryAt: Value(nextRetryAt), updatedAt: Value(DateTime.now())),
     );
   }
 
@@ -125,26 +127,12 @@ class AppDatabase extends _$AppDatabase implements OfflineOutboxRepository {
   // Post တစ်ခုကို Outbox ထဲထည့်ဖို့ စီစဉ်ပေးခြင်း
   Future<void> insertPostToOutbox(String postContent) async {
     await transaction(() async {
-      final postId = await into(posts).insert(
-        PostsCompanion.insert(
-          content: postContent,
-          status: const Value('pending'),
-        )
-      );
+      final postId = await into(posts).insert(PostsCompanion.insert(content: postContent, status: const Value('pending')));
 
-      final payload = jsonEncode({
-        'id': postId,
-        'content': postContent,
-      });
+      final payload = jsonEncode({'id': postId, 'content': postContent});
 
-      await into(outboxQueue).insert(
-        OutboxQueueCompanion.insert(
-          actionType: 'create_post',
-          payload: payload,
-          status: const Value('pending'),
-        )
-      );
-    },);
+      await into(outboxQueue).insert(OutboxQueueCompanion.insert(actionType: 'create_post', payload: payload, status: const Value('pending')));
+    });
   }
 }
 
@@ -156,4 +144,3 @@ LazyDatabase _openConnection() {
     return NativeDatabase.createBackgroundConnection(file);
   });
 }
-

@@ -12,23 +12,18 @@ import 'offline_outbox_repository.dart';
 import 'offline_outbox_item.dart';
 
 class OfflineSyncEngine {
-  final OfflineOutboxRepository
-  _outboxRepository; // Local Database ထဲရှိ Outbox ဇယားကို စီမံမည့် Repository
-  final SyncConfig
-  _config; // Sync လုပ်မည့် သတ်မှတ်ချက်များ (ဥပမာ- ဒေတာဟောင်း သိမ်းမည့်သက်တမ်း)
+  final OfflineOutboxRepository _outboxRepository; // Local Database ထဲရှိ Outbox ဇယားကို စီမံမည့် Repository
+  final SyncConfig _config; // Sync လုပ်မည့် သတ်မှတ်ချက်များ (ဥပမာ- ဒေတာဟောင်း သိမ်းမည့်သက်တမ်း)
   final Connectivity _connectivity;
 
-  final Map<String, OutboxActionProcessor> _processors =
-      {}; // အလုပ်အမျိုးအစားအလိုက် လုပ်ဆောင်ပေးမည့် Processor များကို သိမ်းမည့် Map
-  final List<OfflineCleanupHandler> _cleanupHandlers =
-      []; // ဒေတာဟောင်း clean လုပ်မည့် Handler များစာရင်း
+  final Map<String, OutboxActionProcessor> _processors = {}; // အလုပ်အမျိုးအစားအလိုက် လုပ်ဆောင်ပေးမည့် Processor များကို သိမ်းမည့် Map
+  final List<OfflineCleanupHandler> _cleanupHandlers = []; // ဒေတာဟောင်း clean လုပ်မည့် Handler များစာရင်း
 
   SyncEngineEnums _status = SyncEngineEnums.idle;
   bool _isProcessing = false;
-  StreamSubscription<List<ConnectivityResult>>?
-  _connectivitySub; // အင်တာနက်လိုင်း ရှိ/မရှိ Listen လုပ်ရန်
-  StreamSubscription<List<OfflineOutboxItem>>?
-  _outboxSub; // Outbox ထဲမှာ ဒေတာအသစ်ဝင်ရင် Listen လုပ်ရန်
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub; // အင်တာနက်လိုင်း ရှိ/မရှိ Listen လုပ်ရန်
+  StreamSubscription<List<OfflineOutboxItem>>? _outboxSub; // Outbox ထဲမှာ ဒေတာအသစ်ဝင်ရင် Listen လုပ်ရန်
+  Timer? _retryTimer; // နောက်တစ်ကြိမ် ပြန်လည်စမ်းသပ်ရန် အချိန်သတ်မှတ်ပေးမည့် Timer
 
   SyncEngineEnums get status => _status;
   bool get isProcessing => _isProcessing;
@@ -38,41 +33,29 @@ class OfflineSyncEngine {
   final _statusController = StreamController<SyncEngineEnums>.broadcast();
   Stream<SyncEngineEnums> get statusStream => _statusController.stream;
 
-  OfflineSyncEngine({
-    required OfflineOutboxRepository outboxRepository,
-    SyncConfig config = const SyncConfig(),
-    Connectivity? connectivity,
-  }) : _outboxRepository = outboxRepository,
-       _config = config,
-       _connectivity = connectivity ?? Connectivity() {
+  OfflineSyncEngine({required OfflineOutboxRepository outboxRepository, SyncConfig config = const SyncConfig(), Connectivity? connectivity})
+    : _outboxRepository = outboxRepository,
+      _config = config,
+      _connectivity = connectivity ?? Connectivity() {
     _initListeners();
   }
 
   //
   void registerProcessor(OutboxActionProcessor processor) {
     _processors[processor.actionType] = processor;
-    dev.log(
-      '🔌 Registered outbox processor for action: ${processor.actionType}',
-      name: 'OfflineSyncEngine',
-    );
+    dev.log('🔌 Registered outbox processor for action: ${processor.actionType}', name: 'OfflineSyncEngine');
   }
 
   void registerCleanupHandler(OfflineCleanupHandler handler) {
     _cleanupHandlers.add(handler);
-    dev.log(
-      '🧹 Registered database cleanup handler',
-      name: 'OfflineSyncEngine',
-    );
+    dev.log('🧹 Registered database cleanup handler', name: 'OfflineSyncEngine');
   }
 
   void _initListeners() {
     // 1. အင်တာနက်လိုင်း အပြောင်းအလဲကို စဉ်ဆက်မပြတ် Listen လုပ်
     _connectivitySub = _connectivity.onConnectivityChanged.listen((results) {
-      final hasConnection = !results.contains(ConnectivityResult.none);
-      dev.log(
-        '🌐 Connectivity changed: hasConnection=$hasConnection (results=$results)',
-        name: 'OfflineSyncEngine',
-      );
+      final hasConnection = results.any((result) => result != ConnectivityResult.none);
+      dev.log('🌐 Connectivity changed: hasConnection=$hasConnection (results=$results)', name: 'OfflineSyncEngine');
       if (hasConnection) {
         triggerSync();
       } else {
@@ -82,15 +65,15 @@ class OfflineSyncEngine {
 
     // 2. Local Database (Outbox) ထဲသို့ ဒေတာအသစ်ရောက်လာခြင်း သို့မဟုတ် Update ဖြစ်ခြင်းကို စောင့်ကြည့်သည်
     _outboxSub = _outboxRepository.watchOutbox().listen((items) {
-      final hasPendingItems = items.any(
-        (item) => item.status == 'pending',
-      ); // ပို့ရန်ကျန်သေးသော 'pending' ဒေတာ ပါ၊ မပါ စစ်ဆေးသည်
-      if (hasPendingItems && _status != SyncEngineEnums.offline) {
+      final now = DateTime.now();
+      final hasSyncableItems = items.any((item) {
+        final isPending = item.status == 'pending';
+        final isRetryable = item.status == 'failed' && item.retryCount < item.maxRetries && (item.nextRetryAt == null || item.nextRetryAt!.isBefore(now));
+        return isPending || isRetryable;
+      });
+      if (hasSyncableItems && _status != SyncEngineEnums.offline) {
         // ပို့ရန်ရှိပြီး အော့ဖ်လိုင်းမဟုတ်ပါက
-        dev.log(
-          '📥 Pending items detected in outbox. Triggering sync...',
-          name: 'OfflineSyncEngine',
-        );
+        dev.log('📥 Pending items detected in outbox. Triggering sync...', name: 'OfflineSyncEngine');
         triggerSync();
       }
     });
@@ -101,26 +84,21 @@ class OfflineSyncEngine {
     if (_status != newStatus) {
       _status = newStatus;
       _statusController.add(newStatus);
-      dev.log(
-        '🔄 Sync engine status changed to: $newStatus',
-        name: 'OfflineSyncEngine',
-      );
+      dev.log('🔄 Sync engine status changed to: $newStatus', name: 'OfflineSyncEngine');
     }
   }
 
   /// Triggers the FIFO syncing loop.
   Future<void> triggerSync() async {
     if (_isProcessing) {
-      dev.log(
-        '⚠️ Sync already in progress. Skipping trigger.',
-        name: 'OfflineSyncEngine',
-      );
+      dev.log('⚠️ Sync already in progress. Skipping trigger.', name: 'OfflineSyncEngine');
       return;
     }
 
     // Check internet connection before starting
     final connectivityResult = await _connectivity.checkConnectivity();
-    if (connectivityResult.contains(ConnectivityResult.none)) {
+    final isOffline = connectivityResult.every((result) => result == ConnectivityResult.none) || connectivityResult.isEmpty;
+    if (isOffline) {
       dev.log('🚫 Cannot sync: Offline', name: 'OfflineSyncEngine');
       _updateStatus(SyncEngineEnums.offline);
       return;
@@ -129,6 +107,9 @@ class OfflineSyncEngine {
     _isProcessing = true;
     _updateStatus(SyncEngineEnums.syncing);
 
+    // အသစ်တဖန် Sync လုပ်မည်ဖြစ်သောကြောင့် ရှိနှင့်ပြီးသား Retry Timer ကို ပယ်ဖျက်သည်
+    _retryTimer?.cancel();
+
     dev.log('🚀 Starting FIFO outbox sync loop...', name: 'OfflineSyncEngine');
 
     try {
@@ -136,35 +117,20 @@ class OfflineSyncEngine {
         // Fetch next syncable item in FIFO order
         final item = await _outboxRepository.getNextSyncableItem();
         if (item == null) {
-          dev.log(
-            '🏁 No more syncable items in the outbox.',
-            name: 'OfflineSyncEngine',
-          );
+          dev.log('🏁 No more syncable items in the outbox.', name: 'OfflineSyncEngine');
           break;
         }
 
         final processor = _processors[item.actionType];
         if (processor == null) {
-          dev.log(
-            '❌ Error: No processor registered for action type: ${item.actionType}',
-            name: 'OfflineSyncEngine',
-          );
+          dev.log('❌ Error: No processor registered for action type: ${item.actionType}', name: 'OfflineSyncEngine');
           // ကျန်ရှိနေသော တန်းစီဇယား Block ဖြစ်မသွားစေရန် 'failed' သတ်မှတ်ပြီး ကျော်သည်
-          await _outboxRepository.updateOutboxItem(
-            id: item.id,
-            status: 'failed',
-            retryCount: item.retryCount,
-            lastError: 'No processor registered for ${item.actionType}',
-          );
+          await _outboxRepository.updateOutboxItem(id: item.id, status: 'failed', retryCount: item.retryCount, lastError: 'No processor registered for ${item.actionType}');
           continue;
         }
 
         // ပို့တော့မည့် Item ကို Local Database တွင် 'syncing' အခြေအနေသို့ ပြောင်းလဲသည်
-        await _outboxRepository.updateOutboxItem(
-          id: item.id,
-          status: 'syncing',
-          retryCount: item.retryCount,
-        );
+        await _outboxRepository.updateOutboxItem(id: item.id, status: 'syncing', retryCount: item.retryCount);
 
         // String ဖြင့် သိမ်းထားသော ပို့မည့်ဒေတာ (Payload) ကို JSON Map အဖြစ် ပြန်လည်ပြောင်းလဲ
         Map<String, dynamic> payload;
@@ -172,89 +138,50 @@ class OfflineSyncEngine {
           payload = jsonDecode(item.payload) as Map<String, dynamic>;
         } catch (e) {
           // JSON format မှားခဲ့လျှင်
-          dev.log(
-            '❌ Error decoding payload for item #${item.id}: $e',
-            name: 'OfflineSyncEngine',
-          );
-          await _outboxRepository.updateOutboxItem(
-            id: item.id,
-            status: 'failed',
-            retryCount: item.retryCount,
-            lastError: 'Invalid JSON payload: $e',
-          );
+          dev.log('❌ Error decoding payload for item #${item.id}: $e', name: 'OfflineSyncEngine');
+          await _outboxRepository.updateOutboxItem(id: item.id, status: 'failed', retryCount: item.retryCount, lastError: 'Invalid JSON payload: $e');
           continue;
         }
 
         try {
-          dev.log(
-            '📤 Processing outbox item #${item.id} (Action: ${item.actionType})',
-            name: 'OfflineSyncEngine',
-          );
+          dev.log('📤 Processing outbox item #${item.id} (Action: ${item.actionType})', name: 'OfflineSyncEngine');
 
           // 🛑 ဤနေရာသည် သက်ဆိုင်ရာ Processor ကိုသုံး၍ ဆာဗာသို့ အင်တာနက်မှတစ်ဆင့် အချက်အလက် အမှန်တကယ် ပို့ဆောင်သည့်နေရာဖြစ်သည်
           await processor.process(payload);
 
           // အောင်မြင်လျှင် Outbox မှ ဖျက်
           await _outboxRepository.deleteOutboxItem(item.id);
-          dev.log(
-            '✅ Successfully processed and deleted outbox item #${item.id}',
-            name: 'OfflineSyncEngine',
-          );
+          dev.log('✅ Successfully processed and deleted outbox item #${item.id}', name: 'OfflineSyncEngine');
         } catch (error) {
-          dev.log(
-            '❌ Failed to process outbox item #${item.id}: $error',
-            name: 'OfflineSyncEngine',
-          );
+          dev.log('❌ Failed to process outbox item #${item.id}: $error', name: 'OfflineSyncEngine');
 
           if (_isConflictError(error)) {
             // တက်လာသော error သည် ဒေတာချင်း ထပ်နေသည့် Conflict Error ဖြစ်ပါက
-            dev.log(
-              '⚠️ Conflict detected for item #${item.id}. Invoking conflict handler...',
-              name: 'OfflineSyncEngine',
-            );
+            dev.log('⚠️ Conflict detected for item #${item.id}. Invoking conflict handler...', name: 'OfflineSyncEngine');
 
             // Database တွင် 'conflict' ဟု ပြောင်းလဲမှတ်သား
-            await _outboxRepository.updateOutboxItem(
-              id: item.id,
-              status: 'conflict',
-              retryCount: item.retryCount,
-              lastError: error.toString(),
-            );
+            await _outboxRepository.updateOutboxItem(id: item.id, status: 'conflict', retryCount: item.retryCount, lastError: error.toString());
 
             // သက်ဆိုင်ရာ Processor ၏ Conflict Handler ကို ခေါ်ကာ Local Database တွင် ပြောင်းလဲမှုများ ပြုလုပ်သည်
             await processor.onConflict(error, payload);
 
-            dev.log(
-              '⚠️ Conflict handled. Queue unblocked.',
-              name: 'OfflineSyncEngine',
-            );
+            dev.log('⚠️ Conflict handled. Queue unblocked.', name: 'OfflineSyncEngine');
           } else if (_is5xxOrNetworkError(error)) {
             final newRetryCount = item.retryCount + 1;
             final maxRetries = item.maxRetries;
 
             if (newRetryCount >= maxRetries) {
               // Retry အကြိမ်ရေ အဆုံးစွန် ထိသွားပါက လုံးဝ လက်လျှော့မည်
-              dev.log(
-                '🚨 Item #${item.id} exceeded max retries. Marking as failed.',
-                name: 'OfflineSyncEngine',
-              );
-              await _outboxRepository.updateOutboxItem(
-                id: item.id,
-                status: 'failed',
-                retryCount: newRetryCount,
-                lastError: error.toString(),
-              );
+              dev.log('🚨 Item #${item.id} exceeded max retries. Marking as failed.', name: 'OfflineSyncEngine');
+              await _outboxRepository.updateOutboxItem(id: item.id, status: 'failed', retryCount: newRetryCount, lastError: error.toString());
               await processor.onFailure(error, payload, newRetryCount);
             } else {
               // 🔄 ၅xx / Network Error အတွက် အချိန်တွက်ချက်ခြင်း
               // final Duration delay = _getExponentialDelay(newRetryCount);
-              final Duration delay = newRetryCount.getExponentialDelay(maxRetries);
+              final Duration delay = newRetryCount.getExponentialDelay(newRetryCount);
               final DateTime nextRetryTime = DateTime.now().add(delay);
 
-              dev.log(
-                '⏳ 5xx/Network Error တက်သဖြင့် Item #${item.id} ကို $delay အကြာ (အချိန်: $nextRetryTime) မှ ပြန်လည်စမ်းသပ်ပါမည်။ Retry: $newRetryCount/$maxRetries',
-                name: 'OfflineSyncEngine',
-              );
+              dev.log('⏳ 5xx/Network Error တက်သဖြင့် Item #${item.id} ကို $delay အကြာ (အချိန်: $nextRetryTime) မှ ပြန်လည်စမ်းသပ်ပါမည်။ Retry: $newRetryCount/$maxRetries', name: 'OfflineSyncEngine');
 
               // 🛠️ အရေးကြီး - သင့် updateOutboxItem သို့မဟုတ် သီးသန့် method တွင်
               // nextRetryAt သို့မဟုတ် nextRetryTime ကို Database ထဲ ထည့်သွင်းသိမ်းဆည်းပေးရပါမည်။
@@ -263,8 +190,13 @@ class OfflineSyncEngine {
                 status: 'failed', // stays failed/retryable
                 retryCount: newRetryCount,
                 lastError: error.toString(),
-                // nextRetryAt: nextRetryTime, // 👈 ဤသို့ ကော်လံအသစ် ထည့်သွင်းရန် လိုအပ်ပါသည်
+                nextRetryAt: nextRetryTime,
               );
+
+              // သတ်မှတ်ထားသော Delay အကြာတွင် triggerSync() ကို အလိုအလျောက် ပြန်ခေါ်ရန် Timer သတ်မှတ်သည်
+              _retryTimer = Timer(delay, () {
+                triggerSync();
+              });
             }
 
             // ကွင်းဆက်တစ်ခုလုံး Error ကြောင့် ဒေါင်းမသွားစေရန်နှင့် ဆက်တိုက် Spam မဖြစ်စေရန် Loop ကို ခေတ္တရပ်နားသည်
@@ -277,25 +209,14 @@ class OfflineSyncEngine {
 
             if (newRetryCount >= maxRetries) {
               // သတ်မှတ်ထားသော အကြိမ်ရေထက် ကျော်လွန်သွားပါက
-              dev.log(
-                '🚨 Item #${item.id} exceeded max retries ($maxRetries). Marking as failed.',
-                name: 'OfflineSyncEngine',
-              );
+              dev.log('🚨 Item #${item.id} exceeded max retries ($maxRetries). Marking as failed.', name: 'OfflineSyncEngine');
 
-              await _outboxRepository.updateOutboxItem(
-                id: item.id,
-                status: 'failed',
-                retryCount: newRetryCount,
-                lastError: error.toString(),
-              );
+              await _outboxRepository.updateOutboxItem(id: item.id, status: 'failed', retryCount: newRetryCount, lastError: error.toString());
 
               // Notify processor
               await processor.onFailure(error, payload, newRetryCount);
             } else {
-              dev.log(
-                '🔄 Item #${item.id} failed. Retry count: $newRetryCount/$maxRetries. Postponing...',
-                name: 'OfflineSyncEngine',
-              );
+              dev.log('🔄 Item #${item.id} failed. Retry count: $newRetryCount/$maxRetries. Postponing...', name: 'OfflineSyncEngine');
 
               await _outboxRepository.updateOutboxItem(
                 id: item.id,
@@ -303,6 +224,12 @@ class OfflineSyncEngine {
                 retryCount: newRetryCount,
                 lastError: error.toString(),
               );
+
+              // Standard error များအတွက်လည်း (ဥပမာ timeout) exponential backoff ဖြင့် retry timer ပေးနိုင်သည်
+              final Duration delay = newRetryCount.getExponentialDelay(newRetryCount);
+              _retryTimer = Timer(delay, () {
+                triggerSync();
+              });
             }
 
             // Since it's a standard/transient error (e.g., network timeout during execution),
@@ -329,53 +256,24 @@ class OfflineSyncEngine {
 
   /// Runs database cleanup handlers to remove old synced records
   Future<void> runDatabaseCleanup() async {
-    dev.log(
-      '🧹 Running database cleanup with retention: ${_config.cleanupDuration}',
-      name: 'OfflineSyncEngine',
-    );
+    dev.log('🧹 Running database cleanup with retention: ${_config.cleanupDuration}', name: 'OfflineSyncEngine');
     for (final handler in _cleanupHandlers) {
       try {
         await handler.cleanup(_config.cleanupDuration);
       } catch (e) {
-        dev.log(
-          '❌ Error running cleanup handler: $e',
-          name: 'OfflineSyncEngine',
-        );
+        dev.log('❌ Error running cleanup handler: $e', name: 'OfflineSyncEngine');
       }
     }
   }
 
   /// Detects SQLite and PostgreSQL unique constraint conflicts
   bool _isConflictError(Object error) {
+    dev.log('🚨 Error: $error', name: 'ConflictError');
     final errorStr = error.toString().toLowerCase();
     // 23505 is PostgreSQL/Supabase code for unique_violation.
     // 'duplicate key' is common Postgres/SQLite error text.
     // 'unique constraint' is standard SQLite constraint failure text.
-    return errorStr.contains('23505') ||
-        errorStr.contains('duplicate key') ||
-        errorStr.contains('unique constraint') ||
-        errorStr.contains('already exists');
-  }
-
-  bool _is5xxOrNetworkError(Object error) {
-    final errorStr = error.toString().toLowerCase();
-
-    // Supabase/Postgrest Error Status Code စစ်ဆေးခြင်း (5xx)
-    // ဥပမာ - HTTP Status 500, 502, 503, 504 စသည်ဖြင့် ပါဝင်နေပါက
-    final has5xx =
-        errorStr.contains('500') ||
-        errorStr.contains('502') ||
-        errorStr.contains('503') ||
-        errorStr.contains('504');
-
-    // Network ပြတ်တောက်မှု သို့မဟုတ် Timeout ဖြစ်မှုများ စစ်ဆေးခြင်း
-    final isNetwork =
-        errorStr.contains('socketexception') ||
-        errorStr.contains('httpexception') ||
-        errorStr.contains('timeout') ||
-        errorStr.contains('network_error');
-
-    return has5xx || isNetwork;
+    return errorStr.contains('23505') || errorStr.contains('duplicate key') || errorStr.contains('unique constraint') || errorStr.contains('already exists');
   }
 
   // bool _isConflictError(Object error) {
@@ -397,9 +295,24 @@ class OfflineSyncEngine {
   //   return false;
   // }
 
+  bool _is5xxOrNetworkError(Object error) {
+    dev.log('🚨 Error: $error', name: '500OrNetworkError');
+    final errorStr = error.toString().toLowerCase();
+
+    // Supabase/Postgrest Error Status Code စစ်ဆေးခြင်း (5xx)
+    // ဥပမာ - HTTP Status 500, 502, 503, 504 စသည်ဖြင့် ပါဝင်နေပါက
+    final has5xx = errorStr.contains('500') || errorStr.contains('502') || errorStr.contains('503') || errorStr.contains('504');
+
+    // Network ပြတ်တောက်မှု သို့မဟုတ် Timeout ဖြစ်မှုများ စစ်ဆေးခြင်း
+    final isNetwork = errorStr.contains('socketexception') || errorStr.contains('httpexception') || errorStr.contains('timeout') || errorStr.contains('network_error');
+
+    return has5xx || isNetwork;
+  }
+
   void dispose() {
     _connectivitySub?.cancel();
     _outboxSub?.cancel();
+    _retryTimer?.cancel();
     _statusController.close();
   }
 }

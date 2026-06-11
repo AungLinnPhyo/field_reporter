@@ -7,6 +7,7 @@ class OfflineOutboxItem {
   final String status;
   final String? lastError;
   final DateTime createdAt;
+  final DateTime? nextRetryAt;
   final DateTime? updatedAt;
 
   const OfflineOutboxItem({
@@ -18,6 +19,7 @@ class OfflineOutboxItem {
     required this.status,
     this.lastError,
     required this.createdAt,
+    this.nextRetryAt,
     this.updatedAt,
   });
 }
