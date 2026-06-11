@@ -5,10 +5,12 @@ abstract class OutboxActionProcessor {
   /// Processes the outbox payload (sends data to the server).
   Future<void> process(Map<String, dynamic> payload);
 
-  /// Called when a data conflict is encountered (e.g. unique constraint violation).
+  /// Called when a data conflict occurs (HTTP 409 or DB Constraint).
   ///
-  /// Implementations should mark the local record as conflicted and handle resolution,
-  /// e.g. update status to 'conflict' so the user is notified.
+  /// To implement "Server Wins":
+  /// 1. Extract the authoritative data from [error] (e.g., current SLA or billing status).
+  /// 2. Update the local database record to match the server's state.
+  /// 3. If manual merge is needed, flag the record for user review.
   Future<void> onConflict(Object error, Map<String, dynamic> payload);
 
   /// Called when a general processing failure is encountered.

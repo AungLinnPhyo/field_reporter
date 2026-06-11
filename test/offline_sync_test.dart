@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:drift/native.dart';
 import 'package:field_reporter/shared/enums/sync_engine_enums.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,8 +9,7 @@ import 'package:field_reporter/core/offline/sync_config.dart';
 import 'package:field_reporter/core/offline/outbox_action_processor.dart';
 import 'package:field_reporter/core/offline/offline_cleanup_handler.dart';
 import 'package:field_reporter/features/posts/data/data_sources/local_database.dart';
-import 'package:drift/drift.dart'
-    show Value, ComparableExpr, BooleanExpressionOperators;
+import 'package:drift/drift.dart' show Value, ComparableExpr, BooleanExpressionOperators;
 
 /// Fake Connectivity that simulates online status
 class FakeConnectivity implements Connectivity {
@@ -22,8 +20,7 @@ class FakeConnectivity implements Connectivity {
   Future<List<ConnectivityResult>> checkConnectivity() async => _status;
 
   @override
-  Stream<List<ConnectivityResult>> get onConnectivityChanged =>
-      Stream.value(_status);
+  Stream<List<ConnectivityResult>> get onConnectivityChanged => Stream.value(_status);
 }
 
 /// Fake processor that registers execution events to verify sync actions
@@ -45,14 +42,13 @@ class FakePostProcessor implements OutboxActionProcessor {
   @override
   Future<void> process(Map<String, dynamic> payload) async {
     processedLogs.add(payload['content'] as String);
+    final int localId = payload['id'];
+
     if (onProcessOverride != null) {
       await onProcessOverride!(payload);
     } else {
-      // Default: set status to synced
-      final int localId = payload['id'];
-      await (database.update(database.posts)
-            ..where((t) => t.id.equals(localId)))
-          .write(const PostsCompanion(status: Value('synced')));
+      // Success: Update the actual post status to 'synced'
+      await (database.update(database.posts)..where((t) => t.id.equals(localId))).write(const PostsCompanion(status: Value('synced')));
     }
   }
 
@@ -60,20 +56,17 @@ class FakePostProcessor implements OutboxActionProcessor {
   Future<void> onConflict(Object error, Map<String, dynamic> payload) async {
     lastConflictError = error;
     final int localId = payload['id'];
-    await (database.update(database.posts)..where((t) => t.id.equals(localId)))
-        .write(const PostsCompanion(status: Value('conflict')));
+
+    // "Server Wins": If server says it's a conflict, we might mark it as 'synced'
+    // because the server's version is already authoritative.
+    await (database.update(database.posts)..where((t) => t.id.equals(localId))).write(const PostsCompanion(status: Value('synced')));
   }
 
   @override
-  Future<void> onFailure(
-    Object error,
-    Map<String, dynamic> payload,
-    int currentRetries,
-  ) async {
+  Future<void> onFailure(Object error, Map<String, dynamic> payload, int currentRetries) async {
     lastFailureError = error;
     final int localId = payload['id'];
-    await (database.update(database.posts)..where((t) => t.id.equals(localId)))
-        .write(const PostsCompanion(status: Value('failed')));
+    await (database.update(database.posts)..where((t) => t.id.equals(localId))).write(const PostsCompanion(status: Value('failed')));
   }
 }
 
@@ -85,12 +78,7 @@ class TestPostCleanupHandler implements OfflineCleanupHandler {
   @override
   Future<void> cleanup(Duration retentionDuration) async {
     final thresholdDate = DateTime.now().subtract(retentionDuration);
-    await (database.delete(database.posts)..where(
-          (t) =>
-              t.status.equals('synced') &
-              t.createdAt.isSmallerThanValue(thresholdDate),
-        ))
-        .go();
+    await (database.delete(database.posts)..where((t) => t.status.equals('synced') & t.createdAt.isSmallerThanValue(thresholdDate))).go();
   }
 }
 
@@ -109,10 +97,7 @@ void main() {
     syncEngine = OfflineSyncEngine(
       outboxRepository: database,
       connectivity: connectivity,
-      config: const SyncConfig(
-        maxRetries: 3,
-        cleanupDuration: Duration(days: 7),
-      ),
+      config: const SyncConfig(maxRetries: 3, cleanupDuration: Duration(days: 7)),
     );
 
     postProcessor = FakePostProcessor(database);
@@ -132,10 +117,7 @@ void main() {
     // or just let it process. Since we want to test FIFO specifically,
     // let's insert multiple items offline, then trigger sync
     final offlineConnectivity = FakeConnectivity([ConnectivityResult.none]);
-    final offlineEngine = OfflineSyncEngine(
-      outboxRepository: database,
-      connectivity: offlineConnectivity,
-    );
+    final offlineEngine = OfflineSyncEngine(outboxRepository: database, connectivity: offlineConnectivity);
     offlineEngine.registerProcessor(postProcessor);
 
     // Insert 3 posts offline
@@ -148,20 +130,13 @@ void main() {
     expect(outboxItems.length, 3);
 
     // Switch sync engine to online connectivity and trigger
-    final onlineEngine = OfflineSyncEngine(
-      outboxRepository: database,
-      connectivity: FakeConnectivity([ConnectivityResult.wifi]),
-    );
+    final onlineEngine = OfflineSyncEngine(outboxRepository: database, connectivity: FakeConnectivity([ConnectivityResult.wifi]));
     onlineEngine.registerProcessor(postProcessor);
 
     await onlineEngine.triggerSync();
 
     // Verify processor processed items in exact FIFO order
-    expect(postProcessor.processedLogs, [
-      'First Post',
-      'Second Post',
-      'Third Post',
-    ]);
+    expect(postProcessor.processedLogs, ['First Post', 'Second Post', 'Third Post']);
 
     // Verify outbox queue is now empty
     final finalOutbox = await database.select(database.outboxQueue).get();
@@ -242,9 +217,7 @@ void main() {
       if (!nrcConflictTriggered) {
         nrcConflictTriggered = true;
         // Simulating Supabase postgrest duplicate key error: PostgreSQL 23505
-        throw Exception(
-          'PostgrestException: { message: Duplicate key, code: 23505 }',
-        );
+        throw Exception('PostgrestException: { message: Duplicate key, code: 23505 }');
       }
     };
 
@@ -259,18 +232,12 @@ void main() {
     // and the valid post should successfully sync.
     final outboxItems = await database.select(database.outboxQueue).get();
     // outboxItems should be empty since the duplicate post is marked as 'conflict' and deleted/skipped from active queue processing
-    expect(
-      outboxItems.length,
-      1,
-    ); // Only conflict remains in the outbox but has status='conflict' which is skipped by getNextSyncableItem
+    expect(outboxItems.length, 1); // Only conflict remains in the outbox but has status='conflict' which is skipped by getNextSyncableItem
     expect(outboxItems.first.status, 'conflict');
 
     final posts = await database.select(database.posts).get();
     expect(posts.first.status, 'conflict');
-    expect(
-      posts.last.status,
-      'synced',
-    ); // The valid post has successfully synced!
+    expect(posts.last.status, 'synced'); // The valid post has successfully synced!
   });
 
   test('Synced items older than retention period are auto-cleaned', () async {
@@ -282,26 +249,10 @@ void main() {
     final sevenDaysAgo = DateTime.now().subtract(const Duration(days: 8));
 
     // Add old synced post
-    await database
-        .into(database.posts)
-        .insert(
-          PostsCompanion.insert(
-            content: 'Old Synced Post',
-            status: const Value('synced'),
-            createdAt: Value(sevenDaysAgo),
-          ),
-        );
+    await database.into(database.posts).insert(PostsCompanion.insert(content: 'Old Synced Post', status: const Value('synced'), createdAt: Value(sevenDaysAgo)));
 
     // Add old pending post
-    await database
-        .into(database.posts)
-        .insert(
-          PostsCompanion.insert(
-            content: 'Old Pending Post',
-            status: const Value('pending'),
-            createdAt: Value(sevenDaysAgo),
-          ),
-        );
+    await database.into(database.posts).insert(PostsCompanion.insert(content: 'Old Pending Post', status: const Value('pending'), createdAt: Value(sevenDaysAgo)));
 
     // Verify all 3 posts are in DB
     var posts = await database.select(database.posts).get();

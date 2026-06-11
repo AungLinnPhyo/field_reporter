@@ -157,15 +157,14 @@ class OfflineSyncEngine {
 
           if (_isConflictError(error)) {
             // တက်လာသော error သည် ဒေတာချင်း ထပ်နေသည့် Conflict Error ဖြစ်ပါက
-            dev.log('⚠️ Conflict detected for item #${item.id}. Invoking conflict handler...', name: 'OfflineSyncEngine');
+            dev.log('⚠️ Conflict detected for item #${item.id}. Applying "Server Wins" strategy...', name: 'OfflineSyncEngine');
 
-            // Database တွင် 'conflict' ဟု ပြောင်းလဲမှတ်သား
-            await _outboxRepository.updateOutboxItem(id: item.id, status: 'conflict', retryCount: item.retryCount, lastError: error.toString());
-
-            // သက်ဆိုင်ရာ Processor ၏ Conflict Handler ကို ခေါ်ကာ Local Database တွင် ပြောင်းလဲမှုများ ပြုလုပ်သည်
+            // "Server Wins": Processor handles merging server data into local DB or notifying user
             await processor.onConflict(error, payload);
 
-            dev.log('⚠️ Conflict handled. Queue unblocked.', name: 'OfflineSyncEngine');
+            // Conflict ဖြေရှင်းပြီးပါက Outbox မှ ဖျက်ထုတ်ပြီး Queue ကို ဆက်သွားစေသည် (Server data is now authoritative)
+            await _outboxRepository.deleteOutboxItem(item.id);
+            dev.log('✅ Conflict resolved. Outbox item #${item.id} removed.', name: 'OfflineSyncEngine');
           } else if (_is5xxOrNetworkError(error)) {
             final newRetryCount = item.retryCount + 1;
             final maxRetries = item.maxRetries;
